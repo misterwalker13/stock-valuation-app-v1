@@ -37,9 +37,17 @@ export default function Home() {
     setTickerText((data.tickers ?? []).map((item: TickerItem) => item.ticker).join("\n"));
   }
 
-  async function loadResults() {
-    const response = await fetch(`${API_BASE_URL}/valuation-results`);
+  async function loadResults(showMessage = false) {
+    const response = await fetch(
+      `${API_BASE_URL}/valuation-results?timestamp=${Date.now()}`
+    );
+  
     const data = await response.json();
+  
+    if (!response.ok) {
+      setMessage(data.detail ?? "Failed to reload results.");
+      return;
+    }
   
     const valuationResults = data.results ?? [];
     setResults(valuationResults);
@@ -51,6 +59,10 @@ export default function Home() {
       .reverse();
   
     setLastRefreshed(refreshedDates[0] ?? null);
+  
+    if (showMessage) {
+      setMessage(`Reloaded ${valuationResults.length} valuation results.`);
+    }
   }
 
   async function saveTickers() {
@@ -141,7 +153,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={loadResults}
+            onClick={() => loadResults(true)}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold"
           >
             Reload Results
