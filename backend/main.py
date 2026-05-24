@@ -196,7 +196,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "price_sales_ttm": price_sales_ttm,
                 "data_status": "zero_profit_margin",
                 "row_color": "orange",
-                "calculated_price_display": "0% PM",
+                "calculated_price_display": "n/a",
                 "potential_return_display": "n/a",
                 "source_payload": {
                     **sanitized_payload,
@@ -421,7 +421,7 @@ def save_tickers(request: TickerSaveRequest):
         supabase.table("valuation_results").delete().eq(
             "ticker_list_id", ticker_list_id
         ).execute()
-        
+
     return {
         "status": "ok",
         "ticker_list": ticker_list,
