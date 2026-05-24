@@ -1,27 +1,104 @@
-# Stock Valuation Web App V1 aka Triton
+# Triton: Stock Valuation Web App V1
 
-A login-protected stock valuation web app with a Google Sheets-style workflow.
+Triton is a full-stack stock valuation dashboard for managing ticker lists, refreshing market data, and reviewing valuation outputs in a focused, spreadsheet-inspired workflow.
 
-Users can enter U.S. stock ticker symbols, refresh valuation data, and view a read-only valuation output table.
+The app is built as a private admin workspace: users sign in with Supabase Auth, the frontend verifies admin access, and the backend enforces authenticated admin authorization before serving protected data.
 
-## Current V1 Features
+## What It Does
 
-- Supabase Postgres database schema
-- Supabase Auth-ready user/profile structure
-- FastAPI backend
-- yfinance/Yahoo Finance data retrieval
-- Next.js frontend
-- Ticker cleaning and de-duplication
-- 100-ticker Version 1 limit
-- Manual valuation refresh
-- Calculated price formula
-- Potential return formula
-- Row color logic
-- Double Negative? logic
-- Dashboard-level last refreshed timestamp
+- Stores and manages up to 100 ticker symbols for Version 1
+- Cleans ticker input, removes duplicates, and supports symbols like `BRK.B`
+- Pulls market data from Yahoo Finance through `yfinance`
+- Shows stock price, calculated valuation output, potential return, and double-negative status
+- Uses color-coded rows to make results easier to scan
+- Tracks refresh jobs and latest refreshed timestamps
+- Keeps valuation logic backend-only
 
-## Valuation Logic
+## Tech Stack
 
-The app uses a proprietary backend valuation model to calculate estimated price and potential return.
+- Frontend: Next.js, React, TypeScript, Tailwind CSS
+- Backend: Python, FastAPI
+- Database and auth: Supabase Auth and Supabase Postgres
+- Market data: `yfinance` / Yahoo Finance
+- Frontend hosting: Vercel
+- Backend hosting: Render
 
-The valuation logic is intentionally not exposed in the frontend or public repository documentation.
+## Architecture
+
+```text
+Next.js dashboard
+  -> Supabase Auth session
+  -> FastAPI backend with admin authorization
+  -> Supabase Postgres
+  -> yfinance market data
+```
+
+The browser uses Supabase's public anon key for login and session handling. The backend uses the Supabase service role key for trusted database operations. The service role key must never be exposed to the frontend.
+
+## Environment Variables
+
+Backend:
+
+```env
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+FRONTEND_ORIGIN=
+```
+
+Frontend:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+`NEXT_PUBLIC_` values are browser-visible by design. Do not place private credentials or service role keys in frontend environment variables.
+
+## Local Development
+
+Run the backend:
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn main:app --reload
+```
+
+Run the frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Local URLs:
+
+```text
+Backend:  http://127.0.0.1:8000
+Frontend: http://localhost:3000
+```
+
+Use `http://localhost:3000` for local browser testing.
+
+## Production Notes
+
+- Vercel should deploy from the `frontend` root directory.
+- Render should deploy from the `backend` root directory.
+- `FRONTEND_ORIGIN` on Render must include the full scheme, for example:
+
+```env
+FRONTEND_ORIGIN=https://stock-valuation-app-v1.vercel.app
+```
+
+## Security Notes
+
+- Valuation logic is proprietary and must remain backend-only.
+- Do not expose the valuation model in README files, frontend code, public documentation, portfolio posts, or product copy.
+- Do not expose the Supabase service role key outside the backend.
+- Backend endpoints other than `/health` require a valid Supabase session for an admin or additional admin user.
+
+## V1 Scope
+
+Version 1 is focused on a single admin workflow: save tickers, refresh valuations, and review results. The database schema is designed with future multi-user support in mind, but the production experience is intentionally narrow and admin-first.

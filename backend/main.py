@@ -3,7 +3,7 @@ import re
 from typing import List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import Client, create_client
@@ -299,6 +299,50 @@ def get_supabase_admin_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
+def get_bearer_token(authorization: Optional[str] = Header(default=None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization token.")
+
+    scheme, _, token = authorization.partition(" ")
+
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Invalid authorization header.")
+
+    return token
+
+
+def require_admin_user(token: str = Depends(get_bearer_token)) -> Dict[str, Any]:
+    supabase = get_supabase_admin_client()
+
+    try:
+        user_response = supabase.auth.get_user(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session.")
+
+    user = user_response.user
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session.")
+
+    profile_response = (
+        supabase.table("profiles")
+        .select("user_id, email, role")
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+
+    if not profile_response.data:
+        raise HTTPException(status_code=403, detail="Profile not authorized.")
+
+    profile = profile_response.data[0]
+
+    if profile["role"] not in ["admin", "additional_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required.")
+
+    return profile
+
+
 @app.get("/health")
 def health_check():
     return {
@@ -308,7 +352,7 @@ def health_check():
 
 
 @app.get("/supabase-test")
-def supabase_test():
+def supabase_test(_profile: Dict[str, Any] = Depends(require_admin_user)):
     supabase = get_supabase_admin_client()
 
     response = (
@@ -324,7 +368,7 @@ def supabase_test():
     }
 
 @app.get("/tickers")
-def get_tickers():
+def get_tickers(_profile: Dict[str, Any] = Depends(require_admin_user)):
     supabase = get_supabase_admin_client()
 
     list_response = (
@@ -359,7 +403,10 @@ def get_tickers():
     }
 
 @app.post("/tickers")
-def save_tickers(request: TickerSaveRequest):
+def save_tickers(
+    request: TickerSaveRequest,
+    _profile: Dict[str, Any] = Depends(require_admin_user),
+):
     supabase = get_supabase_admin_client()
 
     cleaned_tickers = clean_tickers(request.tickers)
@@ -436,7 +483,10 @@ def save_tickers(request: TickerSaveRequest):
     }
 
 @app.delete("/tickers/{ticker}")
-def delete_ticker(ticker: str):
+def delete_ticker(
+    ticker: str,
+    _profile: Dict[str, Any] = Depends(require_admin_user),
+):
     supabase = get_supabase_admin_client()
 
     cleaned_ticker = ticker.strip().upper()
@@ -502,7 +552,7 @@ def delete_ticker(ticker: str):
     }
 
 @app.get("/valuation-results")
-def get_valuation_results():
+def get_valuation_results(_profile: Dict[str, Any] = Depends(require_admin_user)):
     supabase = get_supabase_admin_client()
 
     list_response = (
@@ -568,7 +618,7 @@ def get_valuation_results():
     }
 
 @app.post("/refresh-valuations")
-def refresh_valuations():
+def refresh_valuations(_profile: Dict[str, Any] = Depends(require_admin_user)):
     supabase = get_supabase_admin_client()
 
     list_response = (
@@ -697,7 +747,10 @@ def refresh_valuations():
     }
 
 @app.get("/refresh-jobs/{job_id}")
-def get_refresh_job(job_id: str):
+def get_refresh_job(
+    job_id: str,
+    _profile: Dict[str, Any] = Depends(require_admin_user),
+):
     supabase = get_supabase_admin_client()
 
     response = (

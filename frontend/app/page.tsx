@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
@@ -34,23 +34,57 @@ export default function Home() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
-  async function loadTickers() {
-    const response = await fetch(`${API_BASE_URL}/tickers`);
+  const getAuthHeaders = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      router.push("/login");
+      throw new Error("Missing session.");
+    }
+
+    return {
+      Authorization: `Bearer ${session.access_token}`,
+    };
+  }, [router]);
+
+  const handleApiAuthError = useCallback(async (response: Response, data: { detail?: string }) => {
+    if (response.status === 401 || response.status === 403) {
+      await supabase.auth.signOut();
+      router.push("/login");
+      return true;
+    }
+
+    setMessage(data.detail ?? "Request failed.");
+    return false;
+  }, [router]);
+
+  const loadTickers = useCallback(async () => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/tickers`, { headers });
     const data = await response.json();
+
+    if (!response.ok) {
+      await handleApiAuthError(response, data);
+      return;
+    }
 
     setTickers(data.tickers ?? []);
     setTickerText((data.tickers ?? []).map((item: TickerItem) => item.ticker).join("\n"));
-  }
+  }, [getAuthHeaders, handleApiAuthError]);
 
-  async function loadResults(showMessage = false) {
+  const loadResults = useCallback(async (showMessage = false) => {
+    const headers = await getAuthHeaders();
     const response = await fetch(
-      `${API_BASE_URL}/valuation-results?timestamp=${Date.now()}`
+      `${API_BASE_URL}/valuation-results?timestamp=${Date.now()}`,
+      { headers }
     );
   
     const data = await response.json();
   
     if (!response.ok) {
-      setMessage(data.detail ?? "Failed to reload results.");
+      await handleApiAuthError(response, data);
       return;
     }
   
@@ -68,14 +102,16 @@ export default function Home() {
     if (showMessage) {
       setMessage(`Reloaded ${valuationResults.length} valuation results.`);
     }
-  }
+  }, [getAuthHeaders, handleApiAuthError]);
 
   async function saveTickers() {
     const rawTickers = tickerText.split("\n");
+    const authHeaders = await getAuthHeaders();
 
     const response = await fetch(`${API_BASE_URL}/tickers`, {
       method: "POST",
       headers: {
+        ...authHeaders,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ tickers: rawTickers }),
@@ -84,7 +120,7 @@ export default function Home() {
     const data = await response.json();
 
     if (!response.ok) {
-      setMessage(data.detail ?? "Failed to save tickers.");
+      await handleApiAuthError(response, data);
       return;
     }
 
@@ -101,15 +137,17 @@ export default function Home() {
   async function refreshValuations() {
     setIsRefreshing(true);
     setMessage("Refreshing valuations...");
+    const headers = await getAuthHeaders();
 
     const response = await fetch(`${API_BASE_URL}/refresh-valuations`, {
       method: "POST",
+      headers,
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      setMessage(data.detail ?? "Refresh failed.");
+      await handleApiAuthError(response, data);
       setIsRefreshing(false);
       return;
     }
@@ -154,7 +192,7 @@ export default function Home() {
       }
 
       checkAuthAndLoadData();
-    }, [router]);
+    }, [router, loadTickers, loadResults]);
 
   function formatLastRefreshed(value: string | null) {
     if (!value) {
