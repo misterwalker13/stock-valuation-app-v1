@@ -553,10 +553,18 @@ def get_valuation_results():
         .execute()
     )
 
+    results = response.data
+
+    for row in results:
+        if row.get("data_status") == "zero_profit_margin":
+            row["calculated_price_display"] = "n/a"
+            row["potential_return_display"] = "n/a"
+            row["row_color"] = "orange"
+
     return {
         "status": "ok",
         "ticker_list": ticker_list,
-        "results": response.data,
+        "results": results,
     }
 
 @app.post("/refresh-valuations")
