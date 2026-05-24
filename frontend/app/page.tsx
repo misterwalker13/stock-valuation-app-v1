@@ -30,7 +30,9 @@ export default function Home() {
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
   async function loadTickers() {
-    const response = await fetch(`${API_BASE_URL}/tickers`);
+    const response = await fetch(`${API_BASE_URL}/tickers`, {
+      cache: "no-store",
+    });
     const data = await response.json();
 
     setTickers(data.tickers ?? []);
@@ -38,7 +40,9 @@ export default function Home() {
   }
 
   async function loadResults() {
-    const response = await fetch(`${API_BASE_URL}/valuation-results`);
+    const response = await fetch(`${API_BASE_URL}/valuation-results`, {
+      cache: "no-store",
+    });
     const data = await response.json();
   
     const valuationResults = data.results ?? [];
@@ -82,6 +86,7 @@ export default function Home() {
 
     const response = await fetch(`${API_BASE_URL}/refresh-valuations`, {
       method: "POST",
+      cache: "no-store",
     });
 
     const data = await response.json();
