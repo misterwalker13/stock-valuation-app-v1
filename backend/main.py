@@ -398,6 +398,30 @@ def save_tickers(request: TickerSaveRequest):
     if rows_to_insert:
         supabase.table("ticker_list_items").insert(rows_to_insert).execute()
 
+    # Remove old valuation rows for tickers no longer in the saved input list.
+    if cleaned_tickers:
+        existing_results = (
+            supabase.table("valuation_results")
+            .select("id, ticker")
+            .eq("ticker_list_id", ticker_list_id)
+            .execute()
+        )
+
+        stale_result_ids = [
+            row["id"]
+            for row in existing_results.data
+            if row["ticker"] not in cleaned_tickers
+        ]
+
+        if stale_result_ids:
+            supabase.table("valuation_results").delete().in_(
+                "id", stale_result_ids
+            ).execute()
+    else:
+        supabase.table("valuation_results").delete().eq(
+            "ticker_list_id", ticker_list_id
+        ).execute()
+        
     return {
         "status": "ok",
         "ticker_list": ticker_list,
@@ -499,6 +523,22 @@ def get_valuation_results():
     ticker_list = list_response.data[0]
     ticker_list_id = ticker_list["id"]
 
+    items_response = (
+        supabase.table("ticker_list_items")
+        .select("ticker")
+        .eq("ticker_list_id", ticker_list_id)
+        .execute()
+    )
+
+    current_tickers = [item["ticker"] for item in items_response.data]
+
+    if not current_tickers:
+        return {
+            "status": "ok",
+            "ticker_list": ticker_list,
+            "results": [],
+        }
+
     response = (
         supabase.table("valuation_results")
         .select(
@@ -507,6 +547,7 @@ def get_valuation_results():
             "double_negative, row_color, data_status, last_refreshed_at"
         )
         .eq("ticker_list_id", ticker_list_id)
+        .in_("ticker", current_tickers)
         .order("potential_return_raw", desc=True, nullsfirst=False)
         .order("ticker")
         .execute()
