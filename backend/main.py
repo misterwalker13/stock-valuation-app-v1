@@ -60,6 +60,10 @@ class SignupRequest(BaseModel):
     newsletter_opted_in: bool = True
 
 
+class SingleTickerRequest(BaseModel):
+    ticker: str
+
+
 APP_ROLES = {"admin", "additional_admin", "member", "subscriber", "viewer"}
 ADMIN_ROLES = {"admin", "additional_admin"}
 WATCHLIST_REFRESH_COOLDOWN_SECONDS = 60
@@ -118,6 +122,16 @@ def safe_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
+
+def safe_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
 def calculate_valuation(
     stock_price: float,
     eps_ttm: float,
@@ -142,6 +156,70 @@ def calculate_valuation(
         "row_color": row_color,
     }
 
+
+def clean_single_ticker(ticker: str) -> str:
+    cleaned_ticker = ticker.strip().upper()
+
+    if not TICKER_PATTERN.match(cleaned_ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker format.")
+
+    return cleaned_ticker
+
+
+def sanitize_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    content = item.get("content") if isinstance(item.get("content"), dict) else {}
+    provider = item.get("provider") if isinstance(item.get("provider"), dict) else {}
+    click_through = (
+        item.get("clickThroughUrl")
+        if isinstance(item.get("clickThroughUrl"), dict)
+        else {}
+    )
+
+    title = item.get("title") or content.get("title")
+    link = (
+        item.get("link")
+        or content.get("canonicalUrl", {}).get("url")
+        or click_through.get("url")
+    )
+    publisher = (
+        item.get("publisher")
+        or provider.get("displayName")
+        or content.get("provider", {}).get("displayName")
+    )
+    published_at = (
+        item.get("providerPublishTime")
+        or content.get("pubDate")
+        or content.get("displayTime")
+    )
+    summary = item.get("summary") or content.get("summary")
+
+    if isinstance(published_at, (int, float)):
+        published_at = datetime.fromtimestamp(
+            published_at,
+            tz=timezone.utc,
+        ).isoformat()
+
+    return {
+        "title": title,
+        "link": link,
+        "publisher": publisher,
+        "published_at": published_at,
+        "summary": summary,
+    }
+
+
+def build_company_profile(info: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "company_name": info.get("longName") or info.get("shortName"),
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "market_cap": safe_int(info.get("marketCap")),
+        "exchange": info.get("exchange") or info.get("fullExchangeName"),
+        "website": info.get("website"),
+        "summary": info.get("longBusinessSummary"),
+        "currency": info.get("currency"),
+    }
+
 def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
     """
     Fetches the V1 fields from yfinance.
@@ -158,6 +236,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
         yf_ticker = yf.Ticker(yf_symbol)
 
         info = yf_ticker.info or {}
+        company_profile = build_company_profile(info)
 
         stock_price = safe_float(
             info.get("currentPrice")
@@ -189,6 +268,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
             "eps_ttm": eps_ttm,
             "profit_margin": profit_margin,
             "price_sales_ttm": price_sales_ttm,
+            "company_profile": company_profile,
             "source_label": "yfinance",
             "source_timestamp": datetime.now(timezone.utc).isoformat(),
             "retrieval_status": "success",
@@ -287,10 +367,46 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "ticker": ticker,
                 "source_label": "yfinance",
                 "source_timestamp": datetime.now(timezone.utc).isoformat(),
+                "company_profile": {},
                 "retrieval_status": "yfinance_error",
                 "error_message": str(exc)[:250],
             },
         }
+
+
+def fetch_single_ticker_research(ticker: str) -> Dict[str, Any]:
+    data = fetch_yfinance_data(ticker)
+
+    try:
+        yf_ticker = yf.Ticker(to_yfinance_symbol(ticker))
+        news = [
+            sanitize_news_item(item)
+            for item in (yf_ticker.news or [])[:8]
+        ]
+    except Exception:
+        news = []
+
+    company_profile = data.get("source_payload", {}).get("company_profile") or {}
+
+    return {
+        "ticker": ticker,
+        "company_profile": company_profile,
+        "news": news,
+        "valuation": {
+            "ticker": ticker,
+            "stock_price": data["stock_price"],
+            "calculated_price_display": data["calculated_price_display"],
+            "potential_return_display": data["potential_return_display"],
+            "potential_return_raw": data.get("potential_return_raw"),
+            "row_color": data["row_color"],
+            "data_status": data["data_status"],
+            "last_refreshed_at": data["source_payload"]["source_timestamp"],
+        },
+        "source_payload": {
+            **data["source_payload"],
+            "news": news,
+        },
+    }
 
 
 def get_supabase_client() -> Client:
@@ -455,6 +571,48 @@ def enforce_watchlist_refresh_limit(
     )
 
 
+def enforce_single_ticker_refresh_limit(
+    supabase: Client,
+    profile: Dict[str, Any],
+    ticker: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS)
+
+    response = (
+        supabase.table("refresh_events")
+        .select("created_at")
+        .eq("user_id", profile["user_id"])
+        .eq("ticker", ticker)
+        .eq("refresh_type", "single_ticker")
+        .gte("created_at", cutoff.isoformat())
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return
+
+    last_refresh_at = parse_supabase_timestamp(response.data[0]["created_at"])
+    elapsed_seconds = (now - last_refresh_at).total_seconds()
+    retry_after_seconds = max(
+        1,
+        int(SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS - elapsed_seconds),
+    )
+
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "message": (
+                "Single-ticker refresh is available once every 30 seconds "
+                "during the Version 2 beta."
+            ),
+            "retry_after_seconds": retry_after_seconds,
+        },
+    )
+
+
 def record_watchlist_refresh_event(
     supabase: Client,
     profile: Dict[str, Any],
@@ -464,6 +622,18 @@ def record_watchlist_refresh_event(
         "user_id": profile["user_id"],
         "ticker_list_id": ticker_list_id,
         "refresh_type": "watchlist",
+    }).execute()
+
+
+def record_single_ticker_refresh_event(
+    supabase: Client,
+    profile: Dict[str, Any],
+    ticker: str,
+) -> None:
+    supabase.table("refresh_events").insert({
+        "user_id": profile["user_id"],
+        "ticker": ticker,
+        "refresh_type": "single_ticker",
     }).execute()
 
 
@@ -569,6 +739,43 @@ def build_watchlist_summary_maps(
             summaries[ticker_list_id]["last_refresh_job"] = job
 
     return summaries
+
+
+def valuation_row_to_single_ticker_payload(
+    row: Dict[str, Any],
+    is_in_current_watchlist: bool,
+) -> Dict[str, Any]:
+    source_payload = row.get("source_payload") or {}
+
+    return {
+        "ticker": row["ticker"],
+        "is_cached": True,
+        "is_in_current_watchlist": is_in_current_watchlist,
+        "company_profile": source_payload.get("company_profile") or {},
+        "news": source_payload.get("news") or [],
+        "valuation": {
+            "ticker": row["ticker"],
+            "stock_price": row["stock_price"],
+            "calculated_price_display": (
+                "n/a"
+                if row.get("data_status") == "zero_profit_margin"
+                else row["calculated_price_display"]
+            ),
+            "potential_return_display": (
+                "n/a"
+                if row.get("data_status") == "zero_profit_margin"
+                else row["potential_return_display"]
+            ),
+            "potential_return_raw": row.get("potential_return_raw"),
+            "row_color": (
+                "orange"
+                if row.get("data_status") == "zero_profit_margin"
+                else row["row_color"]
+            ),
+            "data_status": row["data_status"],
+            "last_refreshed_at": row["last_refreshed_at"],
+        },
+    }
 
 
 @app.get("/health")
@@ -1091,6 +1298,94 @@ def get_valuation_results(
         "ticker_list": ticker_list,
         "results": results,
     }
+
+
+@app.get("/single-ticker")
+def get_single_ticker(
+    ticker: str,
+    ticker_list_id: Optional[str] = None,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
+    supabase = get_supabase_admin_client()
+    cleaned_ticker = clean_single_ticker(ticker)
+    ticker_list = get_owned_watchlist(supabase, profile, ticker_list_id)
+
+    item_response = (
+        supabase.table("ticker_list_items")
+        .select("ticker")
+        .eq("ticker_list_id", ticker_list["id"])
+        .eq("ticker", cleaned_ticker)
+        .limit(1)
+        .execute()
+    )
+    is_in_current_watchlist = bool(item_response.data)
+
+    cached_response = (
+        supabase.table("valuation_results")
+        .select(
+            "ticker, stock_price, calculated_price_display, "
+            "potential_return_display, potential_return_raw, "
+            "row_color, data_status, last_refreshed_at, source_payload"
+        )
+        .eq("user_id", profile["user_id"])
+        .eq("ticker", cleaned_ticker)
+        .order("last_refreshed_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if cached_response.data:
+        cached_payload = valuation_row_to_single_ticker_payload(
+            cached_response.data[0],
+            is_in_current_watchlist=is_in_current_watchlist,
+        )
+
+        if cached_payload["company_profile"]:
+            return {
+                "status": "ok",
+                "ticker_list": ticker_list,
+                "result": cached_payload,
+            }
+
+    live_payload = fetch_single_ticker_research(cleaned_ticker)
+
+    return {
+        "status": "ok",
+        "ticker_list": ticker_list,
+        "result": {
+            **live_payload,
+            "is_cached": False,
+            "is_in_current_watchlist": is_in_current_watchlist,
+        },
+    }
+
+
+@app.post("/single-ticker/refresh")
+def refresh_single_ticker(
+    request: SingleTickerRequest,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
+    supabase = get_supabase_admin_client()
+    cleaned_ticker = clean_single_ticker(request.ticker)
+
+    enforce_single_ticker_refresh_limit(supabase, profile, cleaned_ticker)
+    record_single_ticker_refresh_event(supabase, profile, cleaned_ticker)
+
+    live_payload = fetch_single_ticker_research(cleaned_ticker)
+
+    return {
+        "status": "ok",
+        "message": (
+            "Single-ticker refresh complete. This temporary lookup is not "
+            "saved to a watchlist unless you add it."
+        ),
+        "result": {
+            **live_payload,
+            "is_cached": False,
+            "is_in_current_watchlist": False,
+        },
+    }
+
 
 @app.post("/refresh-valuations")
 def refresh_valuations(

@@ -29,14 +29,14 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 
 ## V2.3 Single-Ticker Research Page
 
-- [ ] Add separate single-ticker route.
-- [ ] Allow drilldown from dashboard ticker links.
-- [ ] Allow manual ticker lookup from the single-ticker page.
-- [ ] Show temporary lookup result unless user clicks Add to current watchlist.
-- [ ] Show company name, sector, industry, market cap, exchange, website, full summary, stock price, valuation output, and last refreshed.
-- [ ] Add separate yfinance-powered company news box.
-- [ ] Use cached data when available.
-- [ ] Add Refresh button with single-ticker refresh-rate enforcement.
+- [x] Add separate single-ticker route.
+- [x] Allow drilldown from dashboard ticker links.
+- [x] Allow manual ticker lookup from the single-ticker page.
+- [x] Show temporary lookup result unless user clicks Add to current watchlist.
+- [x] Show company name, sector, industry, market cap, exchange, website, full summary, stock price, valuation output, and last refreshed.
+- [x] Add separate yfinance-powered company news box.
+- [x] Use cached data when available.
+- [x] Add Refresh button with single-ticker refresh-rate enforcement.
 
 ## V2.4 Public Product Pages
 

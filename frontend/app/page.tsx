@@ -610,7 +610,14 @@ export default function Home() {
                   ) : (
                     results.map((row) => (
                       <tr key={row.ticker} className={`border-b ${rowClass(row.row_color)}`}>
-                        <td className="p-3 font-semibold">{row.ticker}</td>
+                        <td className="p-3 font-semibold">
+                          <Link
+                            href={`/ticker?ticker=${encodeURIComponent(row.ticker)}&ticker_list_id=${encodeURIComponent(selectedWatchlistId)}`}
+                            className="underline-offset-2 hover:underline"
+                          >
+                            {row.ticker}
+                          </Link>
+                        </td>
                         <td className="p-3">
                           {row.stock_price === null ? "n/a" : `$${row.stock_price.toFixed(2)}`}
                         </td>
