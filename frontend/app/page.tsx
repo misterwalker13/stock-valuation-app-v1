@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
@@ -131,6 +132,7 @@ export default function Home() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [watchlistRefreshSeconds, setWatchlistRefreshSeconds] = useState(60);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -365,6 +367,7 @@ export default function Home() {
       }
 
       setWatchlistRefreshSeconds(data.refresh_limits?.watchlist_seconds ?? 60);
+      setIsAdmin(Boolean(data.is_admin));
       const activeWatchlistId = await loadWatchlists();
 
       if (activeWatchlistId) {
@@ -419,12 +422,22 @@ export default function Home() {
             </p>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-          >
-            Log Out
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+              >
+                Admin
+              </Link>
+            )}
+            <button
+              onClick={handleLogout}
+              className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+            >
+              Log Out
+            </button>
+          </div>
         </header>
 
         <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">

@@ -15,7 +15,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Allow admins to use the normal member dashboard.
 - [x] Add backend refresh-rate enforcement for watchlist refreshes.
 - [x] Add signup endpoint that validates invite code and stores newsletter preference.
-- [ ] Add admin inspection endpoints for users and watchlists.
+- [x] Add admin inspection endpoints for users and watchlists.
 
 ## V2.2 Watchlist Dashboard
 
@@ -25,7 +25,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Keep Save Tickers & Refresh behavior.
 - [x] Transparently explain refresh limits in the dashboard user guide.
 - [ ] Add richer empty states and member-friendly error messaging.
-- [ ] Add admin link to the separate admin route.
+- [x] Add admin link to the separate admin route.
 
 ## V2.3 Single-Ticker Research Page
 

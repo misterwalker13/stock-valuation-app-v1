@@ -528,6 +528,49 @@ def redeem_invite_code(supabase: Client, invite: Dict[str, Any]) -> None:
     }).eq("id", invite["id"]).execute()
 
 
+def build_watchlist_summary_maps(
+    ticker_lists: List[Dict[str, Any]],
+    ticker_items: List[Dict[str, Any]],
+    valuation_results: List[Dict[str, Any]],
+    refresh_jobs: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    summaries: Dict[str, Dict[str, Any]] = {}
+
+    for ticker_list in ticker_lists:
+        summaries[ticker_list["id"]] = {
+            **ticker_list,
+            "ticker_count": 0,
+            "valuation_result_count": 0,
+            "last_refreshed_at": None,
+            "last_refresh_job": None,
+        }
+
+    for item in ticker_items:
+        ticker_list_id = item["ticker_list_id"]
+        if ticker_list_id in summaries:
+            summaries[ticker_list_id]["ticker_count"] += 1
+
+    for result in valuation_results:
+        ticker_list_id = result["ticker_list_id"]
+        if ticker_list_id in summaries:
+            summaries[ticker_list_id]["valuation_result_count"] += 1
+            current_last_refreshed = summaries[ticker_list_id]["last_refreshed_at"]
+            result_last_refreshed = result.get("last_refreshed_at")
+
+            if result_last_refreshed and (
+                current_last_refreshed is None
+                or result_last_refreshed > current_last_refreshed
+            ):
+                summaries[ticker_list_id]["last_refreshed_at"] = result_last_refreshed
+
+    for job in refresh_jobs:
+        ticker_list_id = job["ticker_list_id"]
+        if ticker_list_id in summaries:
+            summaries[ticker_list_id]["last_refresh_job"] = job
+
+    return summaries
+
+
 @app.get("/health")
 def health_check():
     return {
@@ -595,6 +638,182 @@ def supabase_test(_profile: Dict[str, Any] = Depends(require_admin_user)):
     return {
         "status": "ok",
         "profiles": response.data,
+    }
+
+
+@app.get("/admin/users")
+def admin_get_users(_profile: Dict[str, Any] = Depends(require_admin_user)):
+    supabase = get_supabase_admin_client()
+
+    profiles = (
+        supabase.table("profiles")
+        .select(
+            "user_id, email, role, newsletter_opted_in, display_name, "
+            "created_at, updated_at"
+        )
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+
+    ticker_lists = (
+        supabase.table("ticker_lists")
+        .select("id, user_id, name, is_default, created_at, updated_at")
+        .order("created_at")
+        .execute()
+        .data
+    )
+
+    ticker_items = (
+        supabase.table("ticker_list_items")
+        .select("ticker_list_id")
+        .execute()
+        .data
+    )
+
+    valuation_results = (
+        supabase.table("valuation_results")
+        .select("ticker_list_id, last_refreshed_at")
+        .execute()
+        .data
+    )
+
+    refresh_jobs = (
+        supabase.table("refresh_jobs")
+        .select("id, ticker_list_id, status, created_at, finished_at")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+
+    watchlist_summaries = build_watchlist_summary_maps(
+        ticker_lists=ticker_lists,
+        ticker_items=ticker_items,
+        valuation_results=valuation_results,
+        refresh_jobs=refresh_jobs,
+    )
+
+    users = []
+    for profile in profiles:
+        user_watchlists = [
+            summary
+            for summary in watchlist_summaries.values()
+            if summary["user_id"] == profile["user_id"]
+        ]
+
+        users.append({
+            **profile,
+            "watchlist_count": len(user_watchlists),
+            "ticker_count": sum(
+                watchlist["ticker_count"] for watchlist in user_watchlists
+            ),
+            "watchlists": user_watchlists,
+        })
+
+    return {
+        "status": "ok",
+        "users": users,
+    }
+
+
+@app.get("/admin/users/{user_id}")
+def admin_get_user_detail(
+    user_id: str,
+    _profile: Dict[str, Any] = Depends(require_admin_user),
+):
+    supabase = get_supabase_admin_client()
+
+    profile_response = (
+        supabase.table("profiles")
+        .select(
+            "user_id, email, role, newsletter_opted_in, newsletter_opted_in_at, "
+            "display_name, created_at, updated_at"
+        )
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not profile_response.data:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    ticker_lists = (
+        supabase.table("ticker_lists")
+        .select("id, user_id, name, is_default, created_at, updated_at")
+        .eq("user_id", user_id)
+        .order("created_at")
+        .execute()
+        .data
+    )
+
+    ticker_list_ids = [ticker_list["id"] for ticker_list in ticker_lists]
+
+    if ticker_list_ids:
+        ticker_items = (
+            supabase.table("ticker_list_items")
+            .select("ticker_list_id, ticker, sort_order")
+            .in_("ticker_list_id", ticker_list_ids)
+            .order("sort_order")
+            .execute()
+            .data
+        )
+
+        valuation_results = (
+            supabase.table("valuation_results")
+            .select("ticker_list_id, ticker, row_color, last_refreshed_at")
+            .in_("ticker_list_id", ticker_list_ids)
+            .execute()
+            .data
+        )
+
+        refresh_jobs = (
+            supabase.table("refresh_jobs")
+            .select(
+                "id, ticker_list_id, status, total_tickers, completed_tickers, "
+                "failed_tickers, started_at, finished_at, created_at"
+            )
+            .in_("ticker_list_id", ticker_list_ids)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        )
+    else:
+        ticker_items = []
+        valuation_results = []
+        refresh_jobs = []
+
+    watchlist_summaries = build_watchlist_summary_maps(
+        ticker_lists=ticker_lists,
+        ticker_items=ticker_items,
+        valuation_results=valuation_results,
+        refresh_jobs=refresh_jobs,
+    )
+
+    for summary in watchlist_summaries.values():
+        summary["tickers"] = [
+            {
+                "ticker": item["ticker"],
+                "sort_order": item["sort_order"],
+            }
+            for item in ticker_items
+            if item["ticker_list_id"] == summary["id"]
+        ]
+        summary["valuation_results"] = [
+            {
+                "ticker": result["ticker"],
+                "row_color": result["row_color"],
+                "last_refreshed_at": result["last_refreshed_at"],
+            }
+            for result in valuation_results
+            if result["ticker_list_id"] == summary["id"]
+        ]
+
+    return {
+        "status": "ok",
+        "user": {
+            **profile_response.data[0],
+            "watchlists": list(watchlist_summaries.values()),
+        },
     }
 
 
