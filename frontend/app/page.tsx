@@ -35,6 +35,11 @@ type ApiErrorBody = {
   };
 };
 
+type Notice = {
+  tone: "info" | "success" | "warning" | "error";
+  text: string;
+};
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -108,14 +113,30 @@ function extractTickersFromCsv(csvText: string) {
 
 function apiMessage(data: ApiErrorBody) {
   if (typeof data.detail === "string") {
+    if (data.detail.includes("maximum of 100")) {
+      return "This watchlist is capped at 100 valid tickers for the V2 beta. Trim the list and try again.";
+    }
+
+    if (data.detail.includes("maximum of 2 watchlists")) {
+      return "V2 beta accounts can use up to 2 watchlists. Rename or reuse an existing watchlist for now.";
+    }
+
+    if (data.detail.includes("already running")) {
+      return "A refresh is already running for this watchlist. Give it a moment, then check the updated results.";
+    }
+
+    if (data.detail.includes("Watchlist not found")) {
+      return "That watchlist could not be found. Select another watchlist or reload the dashboard.";
+    }
+
     return data.detail;
   }
 
   if (data.detail?.retry_after_seconds) {
-    return `${data.detail.message ?? "Please wait before refreshing again"} Try again in ${data.detail.retry_after_seconds} seconds.`;
+    return `${data.detail.message ?? "Please wait before refreshing again"} You can try again in about ${data.detail.retry_after_seconds} seconds.`;
   }
 
-  return data.detail?.message ?? "Request failed.";
+  return data.detail?.message ?? "Something went wrong. Please try again.";
 }
 
 export default function Home() {
@@ -128,7 +149,7 @@ export default function Home() {
   const [tickerText, setTickerText] = useState("");
   const [tickers, setTickers] = useState<TickerItem[]>([]);
   const [results, setResults] = useState<ValuationResult[]>([]);
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [watchlistRefreshSeconds, setWatchlistRefreshSeconds] = useState(60);
@@ -156,7 +177,10 @@ export default function Home() {
       return true;
     }
 
-    setMessage(apiMessage(data));
+    setNotice({
+      tone: response.status === 429 ? "warning" : "error",
+      text: apiMessage(data),
+    });
     return false;
   }, [router]);
 
@@ -234,6 +258,15 @@ export default function Home() {
 
   async function saveTickers() {
     const rawTickers = tickerText.split("\n");
+
+    if (!rawTickers.some((ticker) => ticker.trim())) {
+      setNotice({
+        tone: "warning",
+        text: "Add at least one ticker before saving this watchlist.",
+      });
+      return;
+    }
+
     const authHeaders = await getAuthHeaders();
 
     const response = await fetch(`${API_BASE_URL}/tickers`, {
@@ -255,7 +288,10 @@ export default function Home() {
       return;
     }
 
-    setMessage(`Saved ${data.saved_count} tickers.`);
+    setNotice({
+      tone: "success",
+      text: `Saved ${data.saved_count} ticker${data.saved_count === 1 ? "" : "s"}. Refreshing valuation results now.`,
+    });
     setTickers(data.tickers ?? []);
     setTickerText((data.tickers ?? []).map((item: TickerItem) => item.ticker).join("\n"));
     await refreshValuations(data.ticker_list?.id ?? selectedWatchlistId);
@@ -286,7 +322,10 @@ export default function Home() {
     }
 
     setNewWatchlistName("");
-    setMessage(`Created watchlist "${data.watchlist.name}".`);
+    setNotice({
+      tone: "success",
+      text: `Created watchlist "${data.watchlist.name}". Add tickers when you are ready.`,
+    });
     const activeWatchlistId = data.watchlist.id;
     setSelectedWatchlistId(activeWatchlistId);
     await loadWatchlists();
@@ -297,7 +336,7 @@ export default function Home() {
   async function handleWatchlistChange(event: ChangeEvent<HTMLSelectElement>) {
     const watchlistId = event.target.value;
     setSelectedWatchlistId(watchlistId);
-    setMessage("");
+    setNotice(null);
     await loadTickers(watchlistId);
     await loadResults(watchlistId);
   }
@@ -309,7 +348,10 @@ export default function Home() {
 
   async function refreshValuations(watchlistId = selectedWatchlistId) {
     setIsRefreshing(true);
-    setMessage("Refreshing valuations...");
+    setNotice({
+      tone: "info",
+      text: "Refreshing valuation results. This can take a moment for larger watchlists.",
+    });
     const authHeaders = await getAuthHeaders();
 
     const response = await fetch(`${API_BASE_URL}/refresh-valuations`, {
@@ -329,7 +371,17 @@ export default function Home() {
       return;
     }
 
-    setMessage(`Refresh complete: ${data.completed_tickers} of ${data.total_tickers} tickers processed.`);
+    if (data.total_tickers === 0) {
+      setNotice({
+        tone: "warning",
+        text: "This watchlist has no saved tickers yet. Add tickers, then save and refresh.",
+      });
+    } else {
+      setNotice({
+        tone: "success",
+        text: `Refresh complete: ${data.completed_tickers} of ${data.total_tickers} ticker${data.total_tickers === 1 ? "" : "s"} processed.`,
+      });
+    }
     await loadResults(watchlistId);
     setIsRefreshing(false);
   }
@@ -345,13 +397,19 @@ export default function Home() {
     const importedTickers = extractTickersFromCsv(csvText);
 
     if (importedTickers.length === 0) {
-      setMessage("No tickers found in the uploaded CSV.");
+      setNotice({
+        tone: "warning",
+        text: "No tickers were found in that CSV. Use a ticker column, symbol column, or put tickers in the first column.",
+      });
       event.target.value = "";
       return;
     }
 
     setTickerText(importedTickers.join("\n"));
-    setMessage(`Loaded ${importedTickers.length} tickers from ${file.name}.`);
+    setNotice({
+      tone: "success",
+      text: `Loaded ${importedTickers.length} ticker${importedTickers.length === 1 ? "" : "s"} from ${file.name}. Review the list, then save and refresh.`,
+    });
     event.target.value = "";
   }
 
@@ -395,6 +453,17 @@ export default function Home() {
     if (color === "red") return "bg-red-100 hover:bg-red-200";
     if (color === "orange") return "bg-orange-100 hover:bg-orange-200";
     return "bg-white hover:bg-slate-50";
+  }
+
+  function noticeClass(tone: Notice["tone"]) {
+    if (tone === "success") return "border-green-200 bg-green-50 text-green-800";
+    if (tone === "warning") return "border-amber-200 bg-amber-50 text-amber-900";
+    if (tone === "error") return "border-red-200 bg-red-50 text-red-700";
+    return "border-slate-200 bg-white text-slate-700";
+  }
+
+  function activeWatchlistName() {
+    return watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? "this watchlist";
   }
 
   if (isAuthChecking) {
@@ -494,11 +563,20 @@ export default function Home() {
           </button>
         </div>
 
-        {message && <p className="mb-4 text-sm text-slate-700">{message}</p>}
+        {notice && (
+          <p className={`mb-4 rounded-lg border p-3 text-sm ${noticeClass(notice.tone)}`}>
+            {notice.text}
+          </p>
+        )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
           <section className="rounded-xl bg-white p-4 shadow-sm">
-            <h2 className="mb-4 text-xl font-semibold">Output Table</h2>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-xl font-semibold">Output Table</h2>
+              <p className="text-xs text-slate-500">
+                {results.length} result{results.length === 1 ? "" : "s"}
+              </p>
+            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
@@ -515,7 +593,18 @@ export default function Home() {
                   {results.length === 0 ? (
                     <tr>
                       <td className="p-3 text-slate-500" colSpan={5}>
-                        No valuation results yet.
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6">
+                          <p className="font-medium text-slate-700">
+                            {tickers.length === 0
+                              ? `${activeWatchlistName()} does not have any saved tickers yet.`
+                              : `${activeWatchlistName()} is ready for its first valuation refresh.`}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {tickers.length === 0
+                              ? "Add tickers on the right, or upload a CSV, then choose Save Tickers & Refresh."
+                              : "Choose Refresh Valuations to populate the output table for the saved tickers."}
+                          </p>
+                        </div>
                       </td>
                     </tr>
                   ) : (
@@ -543,7 +632,17 @@ export default function Home() {
           </section>
 
           <section className="rounded-xl bg-white p-4 shadow-sm">
-            <h2 className="mb-4 text-xl font-semibold">Ticker Input</h2>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">Ticker Input</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Use one ticker per line. Invalid symbols and duplicates are ignored on save.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                {tickers.length} / 100
+              </span>
+            </div>
 
             <label className="mb-3 block">
               <span className="mb-1 block text-sm font-medium">Upload CSV</span>
@@ -571,7 +670,7 @@ export default function Home() {
             </button>
 
             <p className="mt-3 text-xs text-slate-500">
-              Current saved tickers: {tickers.length} / 100
+              Saving replaces the current ticker list for {activeWatchlistName()} and then refreshes valuations when the beta cooldown allows it.
             </p>
           </section>
         </div>

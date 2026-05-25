@@ -24,7 +24,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Keep CSV upload for ticker entry.
 - [x] Keep Save Tickers & Refresh behavior.
 - [x] Transparently explain refresh limits in the dashboard user guide.
-- [ ] Add richer empty states and member-friendly error messaging.
+- [x] Add richer empty states and member-friendly error messaging.
 - [x] Add admin link to the separate admin route.
 
 ## V2.3 Single-Ticker Research Page
