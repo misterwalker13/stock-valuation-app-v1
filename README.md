@@ -98,7 +98,14 @@ FRONTEND_ORIGIN=https://stock-valuation-app-v1.vercel.app
 - Do not expose the valuation model in README files, frontend code, public documentation, portfolio posts, or product copy.
 - Do not expose the Supabase service role key outside the backend.
 - Backend endpoints other than `/health` require a valid Supabase session for an admin or additional admin user.
+- Supabase leaked-password protection is pending a Pro plan upgrade. Revisit this before preparing a paid or mass-market release.
 
 ## V1 Scope
 
 Version 1 is focused on a single admin workflow: save tickers, refresh valuations, and review results. The database schema is designed with future multi-user support in mind, but the production experience is intentionally narrow and admin-first.
+
+## Pre-Commercial Launch Checklist
+
+- Upgrade Supabase to a plan that supports leaked-password protection.
+- Enable leaked-password protection in Authentication settings.
+- Re-run Supabase security advisors and confirm the leaked-password warning is cleared.
