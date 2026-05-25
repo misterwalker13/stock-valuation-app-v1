@@ -14,7 +14,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Scope existing ticker, valuation, and refresh endpoints to the authenticated user.
 - [x] Allow admins to use the normal member dashboard.
 - [x] Add backend refresh-rate enforcement for watchlist refreshes.
-- [ ] Add signup endpoint that validates invite code and stores newsletter preference.
+- [x] Add signup endpoint that validates invite code and stores newsletter preference.
 - [ ] Add admin inspection endpoints for users and watchlists.
 
 ## V2.2 Watchlist Dashboard
@@ -49,10 +49,10 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 
 ## V2.5 Signup And Newsletter
 
-- [ ] Add signup UI.
-- [ ] Require invite/access code for early users.
-- [ ] Default newsletter opt-in checkbox to selected.
-- [ ] Store newsletter opt-in in Supabase only for V2.
+- [x] Add signup UI.
+- [x] Require invite/access code for early users.
+- [x] Default newsletter opt-in checkbox to selected.
+- [x] Store newsletter opt-in in Supabase only for V2.
 - [ ] Avoid external email platform integration until a later version.
 
 ## Refresh-Rate Policy

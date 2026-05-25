@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -39,6 +40,12 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold">Stock Valuation Login</h1>
         <p className="mt-2 text-sm text-slate-600">
           Sign in to access the valuation dashboard.
+        </p>
+        <p className="mt-3 text-sm text-slate-600">
+          Have an invite code?{" "}
+          <Link href="/signup" className="font-semibold text-slate-900 underline">
+            Create a member account
+          </Link>
         </p>
 
         <form onSubmit={handleLogin} className="mt-6 space-y-4">

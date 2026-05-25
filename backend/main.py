@@ -53,6 +53,13 @@ class RefreshValuationsRequest(BaseModel):
     ticker_list_id: Optional[str] = None
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    invite_code: str
+    newsletter_opted_in: bool = True
+
+
 APP_ROLES = {"admin", "additional_admin", "member", "subscriber", "viewer"}
 ADMIN_ROLES = {"admin", "additional_admin"}
 WATCHLIST_REFRESH_COOLDOWN_SECONDS = 60
@@ -60,6 +67,7 @@ SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS = 30
 
 
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{0,24}([.-][A-Z0-9]{1,10})?$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def clean_tickers(raw_tickers: List[str]) -> List[str]:
@@ -459,11 +467,117 @@ def record_watchlist_refresh_event(
     }).execute()
 
 
+def normalize_invite_code(invite_code: str) -> str:
+    return invite_code.strip().upper()
+
+
+def validate_signup_request(request: SignupRequest) -> Dict[str, str]:
+    email = request.email.strip().lower()
+    invite_code = normalize_invite_code(request.invite_code)
+
+    if not EMAIL_PATTERN.match(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+
+    if len(request.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters.",
+        )
+
+    if len(invite_code) < 6:
+        raise HTTPException(status_code=400, detail="Enter a valid invite code.")
+
+    return {
+        "email": email,
+        "invite_code": invite_code,
+    }
+
+
+def get_available_invite_code(supabase: Client, invite_code: str) -> Dict[str, Any]:
+    response = (
+        supabase.table("invite_codes")
+        .select("id, code, max_uses, used_count, is_active, expires_at")
+        .eq("code", invite_code)
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(status_code=400, detail="Invite code is not valid.")
+
+    invite = response.data[0]
+
+    if not invite["is_active"]:
+        raise HTTPException(status_code=400, detail="Invite code is no longer active.")
+
+    if invite["expires_at"]:
+        expires_at = parse_supabase_timestamp(invite["expires_at"])
+        if expires_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="Invite code has expired.")
+
+    if invite["used_count"] >= invite["max_uses"]:
+        raise HTTPException(status_code=400, detail="Invite code has already been used.")
+
+    return invite
+
+
+def redeem_invite_code(supabase: Client, invite: Dict[str, Any]) -> None:
+    supabase.table("invite_codes").update({
+        "used_count": invite["used_count"] + 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", invite["id"]).execute()
+
+
 @app.get("/health")
 def health_check():
     return {
         "status": "ok",
         "service": "stock-valuation-app-api",
+    }
+
+
+@app.post("/signup", status_code=201)
+def signup(request: SignupRequest):
+    supabase = get_supabase_admin_client()
+    normalized = validate_signup_request(request)
+    invite = get_available_invite_code(supabase, normalized["invite_code"])
+
+    try:
+        created_user = supabase.auth.admin.create_user({
+            "email": normalized["email"],
+            "password": request.password,
+            "email_confirm": True,
+        }).user
+    except Exception as exc:
+        error_message = str(exc).lower()
+        if "already" in error_message or "registered" in error_message:
+            raise HTTPException(
+                status_code=400,
+                detail="An account already exists for this email.",
+            )
+
+        raise HTTPException(status_code=400, detail="Unable to create account.")
+
+    newsletter_opted_in_at = (
+        datetime.now(timezone.utc).isoformat()
+        if request.newsletter_opted_in
+        else None
+    )
+
+    supabase.table("profiles").update({
+        "email": normalized["email"],
+        "role": "member",
+        "newsletter_opted_in": request.newsletter_opted_in,
+        "newsletter_opted_in_at": newsletter_opted_in_at,
+        "invite_code_id": invite["id"],
+    }).eq("user_id", created_user.id).execute()
+
+    redeem_invite_code(supabase, invite)
+
+    return {
+        "status": "ok",
+        "message": "Account created.",
+        "email": normalized["email"],
     }
 
 
