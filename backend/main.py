@@ -1,14 +1,13 @@
 import os
 import re
-from typing import List
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import Client, create_client
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
 
 import yfinance as yf
 
@@ -43,6 +42,21 @@ app.add_middleware(
 
 class TickerSaveRequest(BaseModel):
     tickers: List[str]
+    ticker_list_id: Optional[str] = None
+
+
+class WatchlistCreateRequest(BaseModel):
+    name: str
+
+
+class RefreshValuationsRequest(BaseModel):
+    ticker_list_id: Optional[str] = None
+
+
+APP_ROLES = {"admin", "additional_admin", "member", "subscriber", "viewer"}
+ADMIN_ROLES = {"admin", "additional_admin"}
+WATCHLIST_REFRESH_COOLDOWN_SECONDS = 60
+SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS = 30
 
 
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{0,24}([.-][A-Z0-9]{1,10})?$")
@@ -70,7 +84,7 @@ def clean_tickers(raw_tickers: List[str]) -> List[str]:
     if len(cleaned) > 100:
         raise HTTPException(
             status_code=400,
-            detail="Version 1 supports a maximum of 100 valid tickers."
+            detail="Version 2 supports a maximum of 100 valid tickers per watchlist."
         )
 
     return cleaned
@@ -311,7 +325,7 @@ def get_bearer_token(authorization: Optional[str] = Header(default=None)) -> str
     return token
 
 
-def require_admin_user(token: str = Depends(get_bearer_token)) -> Dict[str, Any]:
+def require_app_user(token: str = Depends(get_bearer_token)) -> Dict[str, Any]:
     supabase = get_supabase_admin_client()
 
     try:
@@ -326,7 +340,7 @@ def require_admin_user(token: str = Depends(get_bearer_token)) -> Dict[str, Any]
 
     profile_response = (
         supabase.table("profiles")
-        .select("user_id, email, role")
+        .select("user_id, email, role, newsletter_opted_in, display_name")
         .eq("user_id", user.id)
         .limit(1)
         .execute()
@@ -337,10 +351,112 @@ def require_admin_user(token: str = Depends(get_bearer_token)) -> Dict[str, Any]
 
     profile = profile_response.data[0]
 
-    if profile["role"] not in ["admin", "additional_admin"]:
+    if profile["role"] not in APP_ROLES:
+        raise HTTPException(status_code=403, detail="Profile not authorized.")
+
+    return profile
+
+
+def require_admin_user(profile: Dict[str, Any] = Depends(require_app_user)) -> Dict[str, Any]:
+    if profile["role"] not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin access required.")
 
     return profile
+
+
+def get_owned_watchlist(
+    supabase: Client,
+    profile: Dict[str, Any],
+    ticker_list_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    query = (
+        supabase.table("ticker_lists")
+        .select("id, user_id, name, is_default, created_at, updated_at")
+        .eq("user_id", profile["user_id"])
+    )
+
+    if ticker_list_id:
+        query = query.eq("id", ticker_list_id)
+    else:
+        query = query.eq("is_default", True)
+
+    response = query.order("created_at").limit(1).execute()
+
+    if response.data:
+        return response.data[0]
+
+    if ticker_list_id:
+        raise HTTPException(status_code=404, detail="Watchlist not found.")
+
+    created_response = (
+        supabase.table("ticker_lists")
+        .insert({
+            "user_id": profile["user_id"],
+            "name": "Default",
+            "is_default": True,
+        })
+        .execute()
+    )
+
+    return created_response.data[0]
+
+
+def parse_supabase_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def enforce_watchlist_refresh_limit(
+    supabase: Client,
+    profile: Dict[str, Any],
+    ticker_list_id: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=WATCHLIST_REFRESH_COOLDOWN_SECONDS)
+
+    response = (
+        supabase.table("refresh_events")
+        .select("created_at")
+        .eq("user_id", profile["user_id"])
+        .eq("ticker_list_id", ticker_list_id)
+        .eq("refresh_type", "watchlist")
+        .gte("created_at", cutoff.isoformat())
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return
+
+    last_refresh_at = parse_supabase_timestamp(response.data[0]["created_at"])
+    elapsed_seconds = (now - last_refresh_at).total_seconds()
+    retry_after_seconds = max(
+        1,
+        int(WATCHLIST_REFRESH_COOLDOWN_SECONDS - elapsed_seconds),
+    )
+
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "message": (
+                "Watchlist refresh is available once every 60 seconds during "
+                "the Version 2 beta."
+            ),
+            "retry_after_seconds": retry_after_seconds,
+        },
+    )
+
+
+def record_watchlist_refresh_event(
+    supabase: Client,
+    profile: Dict[str, Any],
+    ticker_list_id: str,
+) -> None:
+    supabase.table("refresh_events").insert({
+        "user_id": profile["user_id"],
+        "ticker_list_id": ticker_list_id,
+        "refresh_type": "watchlist",
+    }).execute()
 
 
 @app.get("/health")
@@ -367,26 +483,93 @@ def supabase_test(_profile: Dict[str, Any] = Depends(require_admin_user)):
         "profiles": response.data,
     }
 
-@app.get("/tickers")
-def get_tickers(_profile: Dict[str, Any] = Depends(require_admin_user)):
+
+@app.get("/me")
+def get_me(profile: Dict[str, Any] = Depends(require_app_user)):
+    return {
+        "status": "ok",
+        "profile": profile,
+        "is_admin": profile["role"] in ADMIN_ROLES,
+        "refresh_limits": {
+            "watchlist_seconds": WATCHLIST_REFRESH_COOLDOWN_SECONDS,
+            "single_ticker_seconds": SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS,
+        },
+    }
+
+
+@app.get("/watchlists")
+def get_watchlists(profile: Dict[str, Any] = Depends(require_app_user)):
     supabase = get_supabase_admin_client()
 
-    list_response = (
+    get_owned_watchlist(supabase, profile)
+
+    response = (
         supabase.table("ticker_lists")
-        .select("id, name, is_default")
-        .eq("is_default", True)
-        .limit(1)
+        .select("id, name, is_default, created_at, updated_at")
+        .eq("user_id", profile["user_id"])
+        .order("is_default", desc=True)
+        .order("created_at")
         .execute()
     )
 
-    if not list_response.data:
-        return {
-            "status": "ok",
-            "ticker_list": None,
-            "tickers": [],
-        }
+    return {
+        "status": "ok",
+        "watchlists": response.data,
+        "limits": {
+            "max_watchlists": 2,
+            "max_tickers_per_watchlist": 100,
+            "watchlist_refresh_seconds": WATCHLIST_REFRESH_COOLDOWN_SECONDS,
+        },
+    }
 
-    ticker_list = list_response.data[0]
+
+@app.post("/watchlists")
+def create_watchlist(
+    request: WatchlistCreateRequest,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
+    supabase = get_supabase_admin_client()
+
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Watchlist name is required.")
+
+    existing_response = (
+        supabase.table("ticker_lists")
+        .select("id")
+        .eq("user_id", profile["user_id"])
+        .execute()
+    )
+
+    if len(existing_response.data) >= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Version 2 supports a maximum of 2 watchlists per user.",
+        )
+
+    create_response = (
+        supabase.table("ticker_lists")
+        .insert({
+            "user_id": profile["user_id"],
+            "name": name,
+            "is_default": len(existing_response.data) == 0,
+        })
+        .execute()
+    )
+
+    return {
+        "status": "ok",
+        "watchlist": create_response.data[0],
+    }
+
+
+@app.get("/tickers")
+def get_tickers(
+    ticker_list_id: Optional[str] = None,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
+    supabase = get_supabase_admin_client()
+    ticker_list = get_owned_watchlist(supabase, profile, ticker_list_id)
 
     items_response = (
         supabase.table("ticker_list_items")
@@ -405,27 +588,12 @@ def get_tickers(_profile: Dict[str, Any] = Depends(require_admin_user)):
 @app.post("/tickers")
 def save_tickers(
     request: TickerSaveRequest,
-    _profile: Dict[str, Any] = Depends(require_admin_user),
+    profile: Dict[str, Any] = Depends(require_app_user),
 ):
     supabase = get_supabase_admin_client()
 
     cleaned_tickers = clean_tickers(request.tickers)
-
-    list_response = (
-        supabase.table("ticker_lists")
-        .select("id, user_id, name, is_default")
-        .eq("is_default", True)
-        .limit(1)
-        .execute()
-    )
-
-    if not list_response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="Default ticker list not found."
-        )
-
-    ticker_list = list_response.data[0]
+    ticker_list = get_owned_watchlist(supabase, profile, request.ticker_list_id)
     ticker_list_id = ticker_list["id"]
 
     # Replace existing saved tickers with the cleaned list.
@@ -485,7 +653,8 @@ def save_tickers(
 @app.delete("/tickers/{ticker}")
 def delete_ticker(
     ticker: str,
-    _profile: Dict[str, Any] = Depends(require_admin_user),
+    ticker_list_id: Optional[str] = None,
+    profile: Dict[str, Any] = Depends(require_app_user),
 ):
     supabase = get_supabase_admin_client()
 
@@ -497,21 +666,7 @@ def delete_ticker(
             detail="Invalid ticker format."
         )
 
-    list_response = (
-        supabase.table("ticker_lists")
-        .select("id, user_id, name, is_default")
-        .eq("is_default", True)
-        .limit(1)
-        .execute()
-    )
-
-    if not list_response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="Default ticker list not found."
-        )
-
-    ticker_list = list_response.data[0]
+    ticker_list = get_owned_watchlist(supabase, profile, ticker_list_id)
     ticker_list_id = ticker_list["id"]
 
     delete_response = (
@@ -552,25 +707,12 @@ def delete_ticker(
     }
 
 @app.get("/valuation-results")
-def get_valuation_results(_profile: Dict[str, Any] = Depends(require_admin_user)):
+def get_valuation_results(
+    ticker_list_id: Optional[str] = None,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
     supabase = get_supabase_admin_client()
-
-    list_response = (
-        supabase.table("ticker_lists")
-        .select("id, user_id, name, is_default")
-        .eq("is_default", True)
-        .limit(1)
-        .execute()
-    )
-
-    if not list_response.data:
-        return {
-            "status": "ok",
-            "ticker_list": None,
-            "results": [],
-        }
-
-    ticker_list = list_response.data[0]
+    ticker_list = get_owned_watchlist(supabase, profile, ticker_list_id)
     ticker_list_id = ticker_list["id"]
 
     items_response = (
@@ -618,26 +760,17 @@ def get_valuation_results(_profile: Dict[str, Any] = Depends(require_admin_user)
     }
 
 @app.post("/refresh-valuations")
-def refresh_valuations(_profile: Dict[str, Any] = Depends(require_admin_user)):
+def refresh_valuations(
+    request: Optional[RefreshValuationsRequest] = None,
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
     supabase = get_supabase_admin_client()
-
-    list_response = (
-        supabase.table("ticker_lists")
-        .select("id, user_id, name, is_default")
-        .eq("is_default", True)
-        .limit(1)
-        .execute()
-    )
-
-    if not list_response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="Default ticker list not found."
-        )
-
-    ticker_list = list_response.data[0]
+    ticker_list_id = request.ticker_list_id if request else None
+    ticker_list = get_owned_watchlist(supabase, profile, ticker_list_id)
     ticker_list_id = ticker_list["id"]
     user_id = ticker_list["user_id"]
+
+    enforce_watchlist_refresh_limit(supabase, profile, ticker_list_id)
 
     # Block refresh if one is already queued or running.
     active_job_response = (
@@ -654,6 +787,8 @@ def refresh_valuations(_profile: Dict[str, Any] = Depends(require_admin_user)):
             status_code=409,
             detail="A refresh job is already running for this ticker list."
         )
+
+    record_watchlist_refresh_event(supabase, profile, ticker_list_id)
 
     tickers_response = (
         supabase.table("ticker_list_items")
@@ -739,8 +874,12 @@ def refresh_valuations(_profile: Dict[str, Any] = Depends(require_admin_user)):
 
     return {
         "status": "ok",
-        "message": "Refresh completed using placeholder valuation rows.",
+        "message": (
+            "Refresh complete. During the Version 2 beta, each watchlist can "
+            "be refreshed once every 60 seconds."
+        ),
         "job_id": refresh_job["id"],
+        "ticker_list": ticker_list,
         "total_tickers": total_tickers,
         "completed_tickers": completed_tickers,
         "total_batches": total_batches,
@@ -749,7 +888,7 @@ def refresh_valuations(_profile: Dict[str, Any] = Depends(require_admin_user)):
 @app.get("/refresh-jobs/{job_id}")
 def get_refresh_job(
     job_id: str,
-    _profile: Dict[str, Any] = Depends(require_admin_user),
+    profile: Dict[str, Any] = Depends(require_app_user),
 ):
     supabase = get_supabase_admin_client()
 
@@ -758,7 +897,8 @@ def get_refresh_job(
         .select(
             "id, status, total_tickers, completed_tickers, failed_tickers, "
             "batch_size, current_batch_number, total_batches, "
-            "error_message, started_at, finished_at, created_at, updated_at"
+            "error_message, started_at, finished_at, created_at, updated_at, "
+            "user_id, ticker_list_id"
         )
         .eq("id", job_id)
         .limit(1)
@@ -772,6 +912,9 @@ def get_refresh_job(
         )
 
     job = response.data[0]
+
+    if job["user_id"] != profile["user_id"] and profile["role"] not in ADMIN_ROLES:
+        raise HTTPException(status_code=404, detail="Refresh job not found.")
 
     return {
         "status": "ok",
