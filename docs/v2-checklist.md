@@ -67,6 +67,7 @@ V2 uses Option C for the beta:
 V3 target:
 
 - Switch to Option B once the product has more usage data and a clearer cost profile.
+- Revisit mobile visual refinement during the final V3 polish stage.
 
 ## Out Of Scope For V2
 
