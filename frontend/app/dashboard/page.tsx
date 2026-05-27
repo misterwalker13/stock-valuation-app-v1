@@ -239,7 +239,7 @@ export default function Home() {
     return watchlistId ? `ticker_list_id=${encodeURIComponent(watchlistId)}&` : "";
   }, []);
 
-  const loadTickers = useCallback(async (watchlistId = selectedWatchlistId) => {
+  const loadTickers = useCallback(async (watchlistId: string) => {
     const headers = await getAuthHeaders();
     const response = await fetch(
       `${API_BASE_URL}/tickers?${watchlistQuery(watchlistId)}timestamp=${Date.now()}`,
@@ -254,13 +254,9 @@ export default function Home() {
 
     setTickers(data.tickers ?? []);
     setTickerText((data.tickers ?? []).map((item: TickerItem) => item.ticker).join("\n"));
+  }, [getAuthHeaders, handleApiAuthError, watchlistQuery]);
 
-    if (!selectedWatchlistId && data.ticker_list?.id) {
-      setSelectedWatchlistId(data.ticker_list.id);
-    }
-  }, [getAuthHeaders, handleApiAuthError, selectedWatchlistId, watchlistQuery]);
-
-  const loadResults = useCallback(async (watchlistId = selectedWatchlistId) => {
+  const loadResults = useCallback(async (watchlistId: string) => {
     const headers = await getAuthHeaders();
     const response = await fetch(
       `${API_BASE_URL}/valuation-results?${watchlistQuery(watchlistId)}timestamp=${Date.now()}`,
@@ -284,9 +280,9 @@ export default function Home() {
       .reverse();
 
     setLastRefreshed(refreshedDates[0] ?? null);
-  }, [getAuthHeaders, handleApiAuthError, selectedWatchlistId, watchlistQuery]);
+  }, [getAuthHeaders, handleApiAuthError, watchlistQuery]);
 
-  const loadWatchlists = useCallback(async () => {
+  const loadWatchlists = useCallback(async (preferredWatchlistId = "") => {
     const headers = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/watchlists`, { headers });
     const data = await response.json();
@@ -298,14 +294,17 @@ export default function Home() {
 
     const loadedWatchlists = data.watchlists ?? [];
     const defaultWatchlist = loadedWatchlists.find((watchlist: Watchlist) => watchlist.is_default);
-    const activeWatchlistId = selectedWatchlistId || defaultWatchlist?.id || loadedWatchlists[0]?.id || "";
+    const preferredWatchlist = loadedWatchlists.find(
+      (watchlist: Watchlist) => watchlist.id === preferredWatchlistId
+    );
+    const activeWatchlistId = preferredWatchlist?.id || defaultWatchlist?.id || loadedWatchlists[0]?.id || "";
 
     setWatchlists(loadedWatchlists);
     setSelectedWatchlistId(activeWatchlistId);
     setWatchlistRefreshSeconds(data.limits?.watchlist_refresh_seconds ?? 60);
 
     return activeWatchlistId;
-  }, [getAuthHeaders, handleApiAuthError, selectedWatchlistId]);
+  }, [getAuthHeaders, handleApiAuthError]);
 
   async function saveTickers() {
     const rawTickers = tickerText.split("\n");
@@ -379,7 +378,7 @@ export default function Home() {
     });
     const activeWatchlistId = data.watchlist.id;
     setSelectedWatchlistId(activeWatchlistId);
-    await loadWatchlists();
+    await loadWatchlists(activeWatchlistId);
     await loadTickers(activeWatchlistId);
     await loadResults(activeWatchlistId);
   }

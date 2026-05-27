@@ -252,7 +252,10 @@ export default function TickerPage() {
 
     const loadedWatchlists = data.watchlists ?? [];
     const defaultWatchlist = loadedWatchlists.find((watchlist: Watchlist) => watchlist.is_default);
-    const activeWatchlistId = preferredWatchlistId || defaultWatchlist?.id || loadedWatchlists[0]?.id || "";
+    const preferredWatchlist = loadedWatchlists.find(
+      (watchlist: Watchlist) => watchlist.id === preferredWatchlistId
+    );
+    const activeWatchlistId = preferredWatchlist?.id || defaultWatchlist?.id || loadedWatchlists[0]?.id || "";
 
     setWatchlists(loadedWatchlists);
     setSelectedWatchlistId(activeWatchlistId);
@@ -392,6 +395,11 @@ export default function TickerPage() {
     setSelectedWatchlistId(watchlistId);
 
     if (result) {
+      window.history.replaceState(
+        null,
+        "",
+        `/ticker?ticker=${encodeURIComponent(result.ticker)}&ticker_list_id=${encodeURIComponent(watchlistId)}`
+      );
       await lookupTicker(result.ticker, watchlistId);
     }
   }
