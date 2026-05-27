@@ -9,7 +9,7 @@ The app is built as a private admin workspace: users sign in with Supabase Auth,
 - Stores and manages up to 100 ticker symbols for Version 1
 - Cleans ticker input, removes duplicates, and supports symbols like `BRK.B`
 - Pulls market data from Yahoo Finance through `yfinance`
-- Shows stock price, calculated valuation output, potential return, and double-negative status
+- Shows stock price, calculated valuation output, calculated price difference, and double-negative status
 - Uses color-coded rows to make results easier to scan
 - Tracks refresh jobs and latest refreshed timestamps
 - Keeps valuation logic backend-only

@@ -139,11 +139,11 @@ def calculate_valuation(
     price_sales_ttm: float,
 ) -> Dict[str, Any]:
     calculated_price = (eps_ttm / profit_margin) * price_sales_ttm
-    potential_return = (calculated_price - stock_price) / stock_price
+    calculated_price_difference = (calculated_price - stock_price) / stock_price
 
-    if potential_return >= 0.25:
+    if calculated_price_difference >= 0.25:
         row_color = "green"
-    elif potential_return >= -0.05:
+    elif calculated_price_difference >= -0.05:
         row_color = "yellow"
     else:
         row_color = "red"
@@ -151,8 +151,10 @@ def calculate_valuation(
     return {
         "calculated_price_raw": calculated_price,
         "calculated_price_display": f"${calculated_price:,.2f}",
-        "potential_return_raw": potential_return,
-        "potential_return_display": f"{potential_return * 100:.3f}%",
+        "calculated_price_difference_raw": calculated_price_difference,
+        "calculated_price_difference_display": (
+            f"{calculated_price_difference * 100:.3f}%"
+        ),
         "row_color": row_color,
     }
 
@@ -283,7 +285,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "data_status": "missing_company_info",
                 "row_color": "orange",
                 "calculated_price_display": "n/a",
-                "potential_return_display": "n/a",
+                "calculated_price_difference_display": "n/a",
                 "source_payload": {
                     **sanitized_payload,
                     "retrieval_status": "missing_company_info",
@@ -299,7 +301,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "data_status": "zero_profit_margin",
                 "row_color": "orange",
                 "calculated_price_display": "n/a",
-                "potential_return_display": "n/a",
+                "calculated_price_difference_display": "n/a",
                 "source_payload": {
                     **sanitized_payload,
                     "retrieval_status": "zero_profit_margin",
@@ -325,7 +327,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "data_status": "missing_required_data",
                 "row_color": "orange",
                 "calculated_price_display": "n/a",
-                "potential_return_display": "n/a",
+                "calculated_price_difference_display": "n/a",
                 "source_payload": {
                     **sanitized_payload,
                     "retrieval_status": "missing_required_data",
@@ -348,8 +350,12 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
             "row_color": valuation["row_color"],
             "calculated_price_raw": valuation["calculated_price_raw"],
             "calculated_price_display": valuation["calculated_price_display"],
-            "potential_return_raw": valuation["potential_return_raw"],
-            "potential_return_display": valuation["potential_return_display"],
+            "calculated_price_difference_raw": valuation[
+                "calculated_price_difference_raw"
+            ],
+            "calculated_price_difference_display": valuation[
+                "calculated_price_difference_display"
+            ],
             "source_payload": sanitized_payload,
         }
 
@@ -362,7 +368,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
             "data_status": "yfinance_error",
             "row_color": "orange",
             "calculated_price_display": "n/a",
-            "potential_return_display": "n/a",
+            "calculated_price_difference_display": "n/a",
             "source_payload": {
                 "ticker": ticker,
                 "source_label": "yfinance",
@@ -396,8 +402,12 @@ def fetch_single_ticker_research(ticker: str) -> Dict[str, Any]:
             "ticker": ticker,
             "stock_price": data["stock_price"],
             "calculated_price_display": data["calculated_price_display"],
-            "potential_return_display": data["potential_return_display"],
-            "potential_return_raw": data.get("potential_return_raw"),
+            "calculated_price_difference_display": data[
+                "calculated_price_difference_display"
+            ],
+            "calculated_price_difference_raw": data.get(
+                "calculated_price_difference_raw"
+            ),
             "row_color": data["row_color"],
             "data_status": data["data_status"],
             "last_refreshed_at": data["source_payload"]["source_timestamp"],
@@ -761,12 +771,12 @@ def valuation_row_to_single_ticker_payload(
                 if row.get("data_status") == "zero_profit_margin"
                 else row["calculated_price_display"]
             ),
-            "potential_return_display": (
+            "calculated_price_difference_display": (
                 "n/a"
                 if row.get("data_status") == "zero_profit_margin"
                 else row["potential_return_display"]
             ),
-            "potential_return_raw": row.get("potential_return_raw"),
+            "calculated_price_difference_raw": row.get("potential_return_raw"),
             "row_color": (
                 "orange"
                 if row.get("data_status") == "zero_profit_margin"
@@ -1293,6 +1303,13 @@ def get_valuation_results(
             row["potential_return_display"] = "n/a"
             row["row_color"] = "orange"
 
+        row["calculated_price_difference_display"] = row[
+            "potential_return_display"
+        ]
+        row["calculated_price_difference_raw"] = row["potential_return_raw"]
+        row.pop("potential_return_display", None)
+        row.pop("potential_return_raw", None)
+
     return {
         "status": "ok",
         "ticker_list": ticker_list,
@@ -1467,9 +1484,13 @@ def refresh_valuations(
                 "ticker": ticker,
                 "stock_price": data["stock_price"],
                 "calculated_price_display": data["calculated_price_display"],
-                "potential_return_display": data["potential_return_display"],
                 "calculated_price_raw": data.get("calculated_price_raw"),
-                "potential_return_raw": data.get("potential_return_raw"),
+                "potential_return_display": data[
+                    "calculated_price_difference_display"
+                ],
+                "potential_return_raw": data.get(
+                    "calculated_price_difference_raw"
+                ),
                 "eps_ttm": data["eps_ttm"],
                 "profit_margin": data["profit_margin"],
                 "price_sales_ttm": data["price_sales_ttm"],

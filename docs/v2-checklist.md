@@ -40,12 +40,12 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 
 ## V2.4 Public Product Pages
 
-- [ ] Add public landing page for Triton Valuation Model.
-- [ ] Add public login and signup links.
-- [ ] Add public disclaimer page with placeholder legal copy.
-- [ ] Add public My Philosophy page using safe positioning language.
-- [ ] Link My Philosophy from inside the logged-in dashboard.
-- [ ] Keep valuation outputs behind login.
+- [x] Add public landing page for Triton Valuation Model.
+- [x] Add public login and signup links.
+- [x] Add public disclaimer page with placeholder legal copy.
+- [x] Add public My Philosophy page using safe positioning language.
+- [x] Link My Philosophy from inside the logged-in dashboard.
+- [x] Keep valuation outputs behind login.
 
 ## V2.5 Signup And Newsletter
 
@@ -53,7 +53,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Require invite/access code for early users.
 - [x] Default newsletter opt-in checkbox to selected.
 - [x] Store newsletter opt-in in Supabase only for V2.
-- [ ] Avoid external email platform integration until a later version.
+- [x] Avoid external email platform integration until a later version.
 
 ## Refresh-Rate Policy
 

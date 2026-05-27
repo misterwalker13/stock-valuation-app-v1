@@ -45,7 +45,7 @@ type SingleTickerResult = {
   valuation: {
     stock_price: number | null;
     calculated_price_display: string | null;
-    potential_return_display: string | null;
+    calculated_price_difference_display: string | null;
     row_color: "green" | "yellow" | "red" | "orange" | "none";
     data_status: string;
     last_refreshed_at: string | null;
@@ -385,7 +385,7 @@ export default function TickerPage() {
           </div>
 
           <Link
-            href="/"
+            href="/dashboard"
             className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
           >
             Dashboard
@@ -500,8 +500,8 @@ export default function TickerPage() {
                     <p className="mt-1 font-semibold">{valuation?.calculated_price_display ?? "n/a"}</p>
                   </div>
                   <div className={`rounded-lg border p-3 ${rowClass(valuation?.row_color ?? "none")}`}>
-                    <p className="text-xs">Potential Return</p>
-                    <p className="mt-1 font-semibold">{valuation?.potential_return_display ?? "n/a"}</p>
+                    <p className="text-xs">Calculated Price Difference</p>
+                    <p className="mt-1 font-semibold">{valuation?.calculated_price_difference_display ?? "n/a"}</p>
                   </div>
                 </div>
 
