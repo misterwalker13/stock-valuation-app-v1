@@ -378,6 +378,8 @@ export default function TickerPage() {
   const financialRatios = result?.financial_ratios ?? {};
   const valuation = result?.valuation;
   const currency = profile.currency ?? "USD";
+  const metricCardClass = "flex min-h-24 flex-col items-center justify-center rounded-lg bg-slate-50 p-4 text-center";
+  const valuationCardClass = `flex min-h-24 flex-col items-center justify-center rounded-lg border p-4 text-center ${rowClass(valuation?.row_color ?? "none")}`;
 
   return (
     <main className="min-h-screen bg-slate-100 p-6 text-slate-900">
@@ -496,39 +498,39 @@ export default function TickerPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Market Cap</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Market Cap</p>
                     <p className="mt-1 font-semibold">{formatLargeNumber(profile.market_cap)}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Stock Price</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Stock Price</p>
                     <p className="mt-1 font-semibold">{formatCurrency(valuation?.stock_price, currency)}</p>
                   </div>
-                  <div className={`rounded-lg border p-3 ${rowClass(valuation?.row_color ?? "none")}`}>
-                    <p className="text-xs">Calculated Price</p>
+                  <div className={valuationCardClass}>
+                    <p className="text-sm font-semibold">Calculated Price</p>
                     <p className="mt-1 font-semibold">{valuation?.calculated_price_display ?? "n/a"}</p>
                   </div>
-                  <div className={`rounded-lg border p-3 ${rowClass(valuation?.row_color ?? "none")}`}>
-                    <p className="text-xs">Calculated Price Difference</p>
+                  <div className={valuationCardClass}>
+                    <p className="text-sm font-semibold">Calculated Price Difference</p>
                     <p className="mt-1 font-semibold">{valuation?.calculated_price_difference_display ?? "n/a"}</p>
                   </div>
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Current Ratio</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Current Ratio</p>
                     <p className="mt-1 font-semibold">{financialRatios.current_ratio_display ?? "n/a"}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Total Debt Ratio</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Total Debt Ratio</p>
                     <p className="mt-1 font-semibold">{financialRatios.total_debt_ratio_display ?? "n/a"}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Return on Assets</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Return on Assets</p>
                     <p className="mt-1 font-semibold">{financialRatios.return_on_assets_display ?? "n/a"}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Return on Equity</p>
+                  <div className={metricCardClass}>
+                    <p className="text-sm font-semibold text-slate-500">Return on Equity</p>
                     <p className="mt-1 font-semibold">{financialRatios.return_on_equity_display ?? "n/a"}</p>
                   </div>
                 </div>
