@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -30,7 +31,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    router.push("/dashboard");
   }
 
   return (
@@ -39,6 +40,12 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold">Stock Valuation Login</h1>
         <p className="mt-2 text-sm text-slate-600">
           Sign in to access the valuation dashboard.
+        </p>
+        <p className="mt-3 text-sm text-slate-600">
+          Have an invite code?{" "}
+          <Link href="/signup" className="font-semibold text-slate-900 underline">
+            Create a member account
+          </Link>
         </p>
 
         <form onSubmit={handleLogin} className="mt-6 space-y-4">
@@ -67,7 +74,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-lg bg-green-700 px-4 py-3 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isLoading ? "Signing in..." : "Sign In"}
           </button>
