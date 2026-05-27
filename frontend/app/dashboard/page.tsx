@@ -28,6 +28,21 @@ type ValuationResult = {
   last_refreshed_at: string | null;
 };
 
+type RefreshJob = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  total_tickers: number;
+  completed_tickers: number;
+  failed_tickers: number;
+  batch_size: number;
+  current_batch_number: number;
+  total_batches: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at?: string | null;
+};
+
 type ApiErrorBody = {
   detail?: string | {
     message?: string;
@@ -139,6 +154,41 @@ function apiMessage(data: ApiErrorBody) {
   return data.detail?.message ?? "Something went wrong. Please try again.";
 }
 
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "calculating...";
+  }
+
+  if (seconds < 60) {
+    return `about ${Math.ceil(seconds)} sec left`;
+  }
+
+  return `about ${Math.ceil(seconds / 60)} min left`;
+}
+
+function estimateRemainingTime(job: RefreshJob) {
+  const startedAt = job.started_at || job.created_at;
+
+  if (!startedAt || job.completed_tickers <= 0) {
+    return "calculating...";
+  }
+
+  const elapsedSeconds = (Date.now() - new Date(startedAt).getTime()) / 1000;
+  const secondsPerTicker = elapsedSeconds / job.completed_tickers;
+  const remainingTickers = Math.max(
+    job.total_tickers - job.completed_tickers,
+    0
+  );
+
+  return formatDuration(secondsPerTicker * remainingTickers);
+}
+
 export default function Home() {
   const router = useRouter();
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -151,6 +201,7 @@ export default function Home() {
   const [results, setResults] = useState<ValuationResult[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshJob, setRefreshJob] = useState<RefreshJob | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [watchlistRefreshSeconds, setWatchlistRefreshSeconds] = useState(60);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -346,11 +397,42 @@ export default function Home() {
     router.push("/login");
   }
 
+  async function pollRefreshJob(jobId: string) {
+    let latestJob: RefreshJob | null = null;
+
+    while (true) {
+      await sleep(1000);
+
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/refresh-jobs/${jobId}`, {
+        headers: authHeaders,
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        await handleApiAuthError(response, data);
+        throw new Error(apiMessage(data));
+      }
+
+      latestJob = data.refresh_job;
+      setRefreshJob(latestJob);
+
+      if (latestJob?.status === "completed") {
+        return latestJob;
+      }
+
+      if (latestJob?.status === "failed") {
+        throw new Error(latestJob.error_message ?? "Refresh failed.");
+      }
+    }
+  }
+
   async function refreshValuations(watchlistId = selectedWatchlistId) {
     setIsRefreshing(true);
+    setRefreshJob(null);
     setNotice({
       tone: "info",
-      text: "Refreshing valuation results. This can take a moment for larger watchlists.",
+      text: "Starting valuation refresh. Progress will update below.",
     });
     const authHeaders = await getAuthHeaders();
 
@@ -368,6 +450,7 @@ export default function Home() {
     if (!response.ok) {
       await handleApiAuthError(response, data);
       setIsRefreshing(false);
+      setRefreshJob(null);
       return;
     }
 
@@ -376,14 +459,30 @@ export default function Home() {
         tone: "warning",
         text: "This watchlist has no saved tickers yet. Add tickers, then save and refresh.",
       });
+      setRefreshJob(null);
     } else {
+      setRefreshJob(data.refresh_job);
       setNotice({
-        tone: "success",
-        text: `Refresh complete: ${data.completed_tickers} of ${data.total_tickers} ticker${data.total_tickers === 1 ? "" : "s"} processed.`,
+        tone: "info",
+        text: `Refreshing ${data.total_tickers} ticker${data.total_tickers === 1 ? "" : "s"}.`,
       });
+
+      try {
+        const completedJob = await pollRefreshJob(data.job_id);
+        setNotice({
+          tone: "success",
+          text: `Refresh complete: ${completedJob.completed_tickers} of ${completedJob.total_tickers} ticker${completedJob.total_tickers === 1 ? "" : "s"} processed.`,
+        });
+      } catch (error) {
+        setNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Refresh failed.",
+        });
+      }
     }
     await loadResults(watchlistId);
     setIsRefreshing(false);
+    setRefreshJob(null);
   }
 
   async function handleCsvUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -473,6 +572,16 @@ export default function Home() {
       </main>
     );
   }
+
+  const refreshProgressPercent = refreshJob?.total_tickers
+    ? Math.min(
+        100,
+        Math.round((refreshJob.completed_tickers / refreshJob.total_tickers) * 100)
+      )
+    : 0;
+  const refreshBatchText = refreshJob?.total_batches
+    ? `Batch ${Math.max(refreshJob.current_batch_number, 1)} of ${refreshJob.total_batches}`
+    : "Preparing batches";
 
   return (
     <main className="min-h-screen bg-slate-100 p-6 text-slate-900">
@@ -573,6 +682,31 @@ export default function Home() {
           <p className={`mb-4 rounded-lg border p-3 text-sm ${noticeClass(notice.tone)}`}>
             {notice.text}
           </p>
+        )}
+
+        {refreshJob && isRefreshing && (
+          <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Refreshing {activeWatchlistName()}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {refreshJob.completed_tickers} of {refreshJob.total_tickers} tickers processed / {refreshBatchText}
+                </p>
+              </div>
+              <p className="text-xs font-semibold text-slate-600">
+                {refreshProgressPercent}% / {estimateRemainingTime(refreshJob)}
+              </p>
+            </div>
+
+            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-green-600 transition-all duration-500"
+                style={{ width: `${Math.max(refreshProgressPercent, 3)}%` }}
+              />
+            </div>
+          </section>
         )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">

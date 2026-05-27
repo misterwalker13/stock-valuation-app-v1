@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import Client, create_client
@@ -68,6 +68,9 @@ APP_ROLES = {"admin", "additional_admin", "member", "subscriber", "viewer"}
 ADMIN_ROLES = {"admin", "additional_admin"}
 WATCHLIST_REFRESH_COOLDOWN_SECONDS = 60
 SINGLE_TICKER_REFRESH_COOLDOWN_SECONDS = 30
+CHART_CACHE_TTL_SECONDS = 300
+VALID_CHART_PERIODS = {"1D", "5D", "1M", "6M", "YTD", "1Y", "5Y"}
+CHART_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{0,24}([.-][A-Z0-9]{1,10})?$")
@@ -340,6 +343,252 @@ def empty_financial_ratios() -> Dict[str, Any]:
         "return_on_equity_raw": None,
         "return_on_equity_display": "n/a",
     }
+
+
+def chart_history_config(period: str) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+
+    configs = {
+        "1D": {"period": "1d", "interval": "1m", "fallback_interval": "5m"},
+        "5D": {"period": "5d", "interval": "15m"},
+        "1M": {"period": "1mo", "interval": "1d"},
+        "6M": {"period": "6mo", "interval": "1d"},
+        "1Y": {"period": "1y", "interval": "1d"},
+        "5Y": {"period": "5y", "interval": "1wk"},
+        "YTD": {
+            "start": datetime(now.year, 1, 1, tzinfo=timezone.utc),
+            "end": now,
+            "interval": "1d",
+        },
+    }
+
+    return configs[period]
+
+
+def format_chart_label(timestamp: Any, period: str) -> str:
+    parsed_timestamp = timestamp.to_pydatetime()
+
+    if parsed_timestamp.tzinfo is None:
+        parsed_timestamp = parsed_timestamp.replace(tzinfo=timezone.utc)
+
+    if period == "1D":
+        return parsed_timestamp.strftime("%I:%M %p").lstrip("0")
+
+    if period == "5D":
+        return parsed_timestamp.strftime("%b %-d %I:%M %p")
+
+    return parsed_timestamp.strftime("%b %-d, %Y")
+
+
+def fetch_chart_series(
+    symbol: str,
+    period: str,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    yf_ticker = yf.Ticker(symbol)
+    history_kwargs = {"interval": config["interval"], "auto_adjust": False}
+
+    if "start" in config:
+        history_kwargs["start"] = config["start"]
+        history_kwargs["end"] = config["end"]
+    else:
+        history_kwargs["period"] = config["period"]
+
+    history = yf_ticker.history(**history_kwargs)
+
+    if (
+        history is None
+        or history.empty
+    ) and period == "1D" and config.get("fallback_interval"):
+        history_kwargs["interval"] = config["fallback_interval"]
+        history = yf_ticker.history(**history_kwargs)
+
+    if history is None or history.empty or "Close" not in history:
+        return {
+            "points": {},
+            "is_available": False,
+        }
+
+    close_series = history["Close"].dropna()
+
+    if close_series.empty:
+        return {
+            "points": {},
+            "is_available": False,
+        }
+
+    first_close = safe_float(close_series.iloc[0])
+
+    if first_close in (None, 0):
+        return {
+            "points": {},
+            "is_available": False,
+        }
+
+    points = {}
+
+    for timestamp, close_value in close_series.items():
+        close = safe_float(close_value)
+
+        if close is None:
+            continue
+
+        timestamp_iso = timestamp.isoformat()
+        points[timestamp_iso] = {
+            "timestamp": timestamp_iso,
+            "label": format_chart_label(timestamp, period),
+            "performance": ((close - first_close) / first_close) * 100,
+            "price": close,
+        }
+
+    return {
+        "points": points,
+        "is_available": bool(points),
+    }
+
+
+def build_performance_chart(ticker: str, period: str) -> Dict[str, Any]:
+    cleaned_period = period.upper()
+
+    if cleaned_period not in VALID_CHART_PERIODS:
+        raise HTTPException(status_code=400, detail="Invalid chart period.")
+
+    cache_key = f"{ticker}:{cleaned_period}"
+    cached_chart = CHART_CACHE.get(cache_key)
+    now = datetime.now(timezone.utc)
+
+    if cached_chart:
+        cached_at = parse_supabase_timestamp(cached_chart["fetched_at"])
+        if (now - cached_at).total_seconds() < CHART_CACHE_TTL_SECONDS:
+            return {
+                **cached_chart["payload"],
+                "is_cached": True,
+            }
+
+    config = chart_history_config(cleaned_period)
+    ticker_series = fetch_chart_series(
+        to_yfinance_symbol(ticker),
+        cleaned_period,
+        config,
+    )
+    spy_series = fetch_chart_series("SPY", cleaned_period, config)
+    timestamps = sorted(
+        set(ticker_series["points"].keys()) | set(spy_series["points"].keys())
+    )
+
+    points = []
+
+    for timestamp in timestamps:
+        ticker_point = ticker_series["points"].get(timestamp)
+        spy_point = spy_series["points"].get(timestamp)
+        display_point = ticker_point or spy_point
+
+        if not display_point:
+            continue
+
+        points.append({
+            "timestamp": timestamp,
+            "label": display_point["label"],
+            "ticker_performance": (
+                ticker_point["performance"] if ticker_point else None
+            ),
+            "spy_performance": (
+                spy_point["performance"] if spy_point else None
+            ),
+        })
+
+    payload = {
+        "period": cleaned_period,
+        "ticker": ticker,
+        "benchmark_ticker": "SPY",
+        "points": points,
+        "ticker_available": ticker_series["is_available"],
+        "benchmark_available": spy_series["is_available"],
+        "fetched_at": now.isoformat(),
+        "is_cached": False,
+    }
+
+    CHART_CACHE[cache_key] = {
+        "fetched_at": payload["fetched_at"],
+        "payload": payload,
+    }
+
+    return payload
+
+
+def process_refresh_job(
+    refresh_job_id: str,
+    user_id: str,
+    ticker_list_id: str,
+    tickers: List[Dict[str, Any]],
+    total_batches: int,
+    batch_size: int,
+) -> None:
+    supabase = get_supabase_admin_client()
+    completed_tickers = 0
+    failed_tickers = 0
+
+    try:
+        for index, item in enumerate(tickers):
+            ticker = item["ticker"]
+            current_batch_number = (index // batch_size) + 1
+            data = fetch_yfinance_data(ticker)
+
+            supabase.table("valuation_results").upsert(
+                {
+                    "user_id": user_id,
+                    "ticker_list_id": ticker_list_id,
+                    "ticker": ticker,
+                    "stock_price": data["stock_price"],
+                    "calculated_price_display": data["calculated_price_display"],
+                    "calculated_price_raw": data.get("calculated_price_raw"),
+                    "potential_return_display": data[
+                        "calculated_price_difference_display"
+                    ],
+                    "potential_return_raw": data.get(
+                        "calculated_price_difference_raw"
+                    ),
+                    "eps_ttm": data["eps_ttm"],
+                    "profit_margin": data["profit_margin"],
+                    "price_sales_ttm": data["price_sales_ttm"],
+                    "data_status": data["data_status"],
+                    "row_color": data["row_color"],
+                    "source_label": "yfinance",
+                    "source_payload": data["source_payload"],
+                    "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
+                },
+                on_conflict="ticker_list_id,ticker"
+            ).execute()
+
+            completed_tickers += 1
+
+            supabase.table("refresh_jobs").update(
+                {
+                    "completed_tickers": completed_tickers,
+                    "failed_tickers": failed_tickers,
+                    "current_batch_number": current_batch_number,
+                }
+            ).eq("id", refresh_job_id).execute()
+
+        supabase.table("refresh_jobs").update(
+            {
+                "status": "completed",
+                "completed_tickers": completed_tickers,
+                "failed_tickers": failed_tickers,
+                "current_batch_number": total_batches,
+                "finished_at": "now()",
+            }
+        ).eq("id", refresh_job_id).execute()
+    except Exception as exc:
+        supabase.table("refresh_jobs").update(
+            {
+                "status": "failed",
+                "completed_tickers": completed_tickers,
+                "failed_tickers": failed_tickers + 1,
+                "error_message": str(exc)[:250],
+                "finished_at": "now()",
+            }
+        ).eq("id", refresh_job_id).execute()
 
 
 def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
@@ -1535,8 +1784,23 @@ def refresh_single_ticker(
     }
 
 
+@app.get("/single-ticker/chart")
+def get_single_ticker_chart(
+    ticker: str,
+    period: str = "1Y",
+    profile: Dict[str, Any] = Depends(require_app_user),
+):
+    cleaned_ticker = clean_single_ticker(ticker)
+
+    return {
+        "status": "ok",
+        "chart": build_performance_chart(cleaned_ticker, period),
+    }
+
+
 @app.post("/refresh-valuations")
 def refresh_valuations(
+    background_tasks: BackgroundTasks,
     request: Optional[RefreshValuationsRequest] = None,
     profile: Dict[str, Any] = Depends(require_app_user),
 ):
@@ -1576,7 +1840,7 @@ def refresh_valuations(
 
     tickers = tickers_response.data
     total_tickers = len(tickers)
-    batch_size = 20
+    batch_size = min(20, total_tickers) if total_tickers else 0
     total_batches = (total_tickers + batch_size - 1) // batch_size if total_tickers else 0
 
     job_insert_response = (
@@ -1597,71 +1861,37 @@ def refresh_valuations(
     )
 
     refresh_job = job_insert_response.data[0]
-    completed_tickers = 0
 
-    for index, item in enumerate(tickers):
-        ticker = item["ticker"]
-
-        current_batch_number = (index // batch_size) + 1
-
-        # Placeholder valuation row.
-        # Real yfinance data will be added in the next step.
-        data = fetch_yfinance_data(ticker)
-
-        supabase.table("valuation_results").upsert(
-            {
-                "user_id": user_id,
-                "ticker_list_id": ticker_list_id,
-                "ticker": ticker,
-                "stock_price": data["stock_price"],
-                "calculated_price_display": data["calculated_price_display"],
-                "calculated_price_raw": data.get("calculated_price_raw"),
-                "potential_return_display": data[
-                    "calculated_price_difference_display"
-                ],
-                "potential_return_raw": data.get(
-                    "calculated_price_difference_raw"
-                ),
-                "eps_ttm": data["eps_ttm"],
-                "profit_margin": data["profit_margin"],
-                "price_sales_ttm": data["price_sales_ttm"],
-                "data_status": data["data_status"],
-                "row_color": data["row_color"],
-                "source_label": "yfinance",
-                "source_payload": data["source_payload"],
-                "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="ticker_list_id,ticker"
-        ).execute()
-
-        completed_tickers += 1
-
+    if total_tickers == 0:
         supabase.table("refresh_jobs").update(
             {
-                "completed_tickers": completed_tickers,
-                "current_batch_number": current_batch_number,
+                "status": "completed",
+                "finished_at": "now()",
             }
         ).eq("id", refresh_job["id"]).execute()
-
-    supabase.table("refresh_jobs").update(
-        {
-            "status": "completed",
-            "completed_tickers": completed_tickers,
-            "current_batch_number": total_batches,
-            "finished_at": "now()",
-        }
-    ).eq("id", refresh_job["id"]).execute()
+        refresh_job["status"] = "completed"
+    else:
+        background_tasks.add_task(
+            process_refresh_job,
+            refresh_job["id"],
+            user_id,
+            ticker_list_id,
+            tickers,
+            total_batches,
+            batch_size,
+        )
 
     return {
         "status": "ok",
         "message": (
-            "Refresh complete. During the Version 2 beta, each watchlist can "
+            "Refresh started. During the Version 2 beta, each watchlist can "
             "be refreshed once every 60 seconds."
         ),
         "job_id": refresh_job["id"],
+        "refresh_job": refresh_job,
         "ticker_list": ticker_list,
         "total_tickers": total_tickers,
-        "completed_tickers": completed_tickers,
+        "completed_tickers": 0,
         "total_batches": total_batches,
     }
 

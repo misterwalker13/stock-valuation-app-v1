@@ -4,6 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { supabase } from "../../lib/supabaseClient";
 
 type Watchlist = {
@@ -15,6 +25,13 @@ type Watchlist = {
 type TickerItem = {
   ticker: string;
   sort_order: number;
+};
+
+type MiniResultRow = {
+  ticker: string;
+  stock_price: number | null;
+  calculated_price_difference_display: string | null;
+  row_color: "green" | "yellow" | "red" | "orange" | "none";
 };
 
 type CompanyProfile = {
@@ -41,6 +58,26 @@ type FinancialRatios = {
   total_debt_ratio_display?: string | null;
   return_on_assets_display?: string | null;
   return_on_equity_display?: string | null;
+};
+
+type ChartPeriod = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y";
+
+type ChartPoint = {
+  timestamp: string;
+  label: string;
+  ticker_performance: number | null;
+  spy_performance: number | null;
+};
+
+type PerformanceChart = {
+  period: ChartPeriod;
+  ticker: string;
+  benchmark_ticker: string;
+  points: ChartPoint[];
+  ticker_available: boolean;
+  benchmark_available: boolean;
+  fetched_at: string;
+  is_cached: boolean;
 };
 
 type SingleTickerResult = {
@@ -74,6 +111,7 @@ type Notice = {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const CHART_PERIODS: ChartPeriod[] = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y"];
 
 function apiMessage(data: ApiErrorBody) {
   if (typeof data.detail === "string") {
@@ -137,6 +175,24 @@ function noticeClass(tone: Notice["tone"]) {
   return "border-slate-200 bg-white text-slate-700";
 }
 
+function formatChartPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  return `${value.toFixed(2)}%`;
+}
+
+function formatChartAxisPercent(value: number) {
+  const roundedValue = Math.round(value);
+
+  if (Object.is(roundedValue, -0)) {
+    return "0%";
+  }
+
+  return `${roundedValue}%`;
+}
+
 export default function TickerPage() {
   const router = useRouter();
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -148,6 +204,12 @@ export default function TickerPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("1Y");
+  const [performanceChart, setPerformanceChart] = useState<PerformanceChart | null>(null);
+  const [isChartLoading, setIsChartLoading] = useState(false);
+  const [chartError, setChartError] = useState("");
+  const [miniResults, setMiniResults] = useState<MiniResultRow[]>([]);
+  const [isMiniResultsLoading, setIsMiniResultsLoading] = useState(false);
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -236,6 +298,61 @@ export default function TickerPage() {
     });
   }, [getAuthHeaders, handleApiAuthError]);
 
+  const loadPerformanceChart = useCallback(async (ticker: string, period: ChartPeriod) => {
+    if (!ticker) {
+      return;
+    }
+
+    setIsChartLoading(true);
+    setChartError("");
+
+    const headers = await getAuthHeaders();
+    const response = await fetch(
+      `${API_BASE_URL}/single-ticker/chart?ticker=${encodeURIComponent(ticker)}&period=${encodeURIComponent(period)}&timestamp=${Date.now()}`,
+      { headers }
+    );
+    const data = await response.json();
+
+    setIsChartLoading(false);
+
+    if (!response.ok) {
+      const handledAuthError = await handleApiAuthError(response, data);
+
+      if (!handledAuthError) {
+        setChartError(apiMessage(data));
+      }
+
+      return;
+    }
+
+    setPerformanceChart(data.chart);
+  }, [getAuthHeaders, handleApiAuthError]);
+
+  const loadMiniResults = useCallback(async (watchlistId: string) => {
+    if (!watchlistId) {
+      setMiniResults([]);
+      return;
+    }
+
+    setIsMiniResultsLoading(true);
+
+    const headers = await getAuthHeaders();
+    const response = await fetch(
+      `${API_BASE_URL}/valuation-results?ticker_list_id=${encodeURIComponent(watchlistId)}&timestamp=${Date.now()}`,
+      { headers }
+    );
+    const data = await response.json();
+
+    setIsMiniResultsLoading(false);
+
+    if (!response.ok) {
+      await handleApiAuthError(response, data);
+      return;
+    }
+
+    setMiniResults(data.results ?? []);
+  }, [getAuthHeaders, handleApiAuthError]);
+
   useEffect(() => {
     async function bootstrap() {
       const params = new URLSearchParams(window.location.search);
@@ -254,6 +371,18 @@ export default function TickerPage() {
     bootstrap();
   }, [loadWatchlists, lookupTicker]);
 
+  useEffect(() => {
+    if (!result?.ticker) {
+      return;
+    }
+
+    loadPerformanceChart(result.ticker, chartPeriod);
+  }, [chartPeriod, loadPerformanceChart, result?.ticker]);
+
+  useEffect(() => {
+    loadMiniResults(selectedWatchlistId);
+  }, [loadMiniResults, selectedWatchlistId]);
+
   async function handleLookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await lookupTicker(tickerInput, selectedWatchlistId);
@@ -265,6 +394,18 @@ export default function TickerPage() {
     if (result) {
       await lookupTicker(result.ticker, watchlistId);
     }
+  }
+
+  async function openMiniResultTicker(ticker: string) {
+    if (selectedWatchlistId) {
+      window.history.replaceState(
+        null,
+        "",
+        `/ticker?ticker=${encodeURIComponent(ticker)}&ticker_list_id=${encodeURIComponent(selectedWatchlistId)}`
+      );
+    }
+
+    await lookupTicker(ticker, selectedWatchlistId);
   }
 
   async function refreshTicker() {
@@ -541,6 +682,104 @@ export default function TickerPage() {
               </div>
 
               <div className="rounded-xl bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold">Stock Performance</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Percentage performance compared with SPY over the same period.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {CHART_PERIODS.map((period) => (
+                      <button
+                        key={period}
+                        type="button"
+                        onClick={() => setChartPeriod(period)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                          chartPeriod === period
+                            ? "bg-slate-900 text-white"
+                            : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {period}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-5 h-80">
+                  {isChartLoading ? (
+                    <div className="flex h-full items-center justify-center rounded-lg bg-slate-50 text-sm font-medium text-slate-500">
+                      Loading performance chart...
+                    </div>
+                  ) : chartError ? (
+                    <div className="flex h-full items-center justify-center rounded-lg bg-slate-50 p-6 text-center text-sm text-red-700">
+                      {chartError}
+                    </div>
+                  ) : !performanceChart || performanceChart.points.length === 0 ? (
+                    <div className="flex h-full items-center justify-center rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500">
+                      Performance chart data is unavailable for this period.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={performanceChart.points} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+                        <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fill: "#64748b", fontSize: 12 }}
+                          tickLine={false}
+                          minTickGap={28}
+                        />
+                        <YAxis
+                          tick={{ fill: "#64748b", fontSize: 12 }}
+                          tickFormatter={(value) => formatChartAxisPercent(Number(value))}
+                          tickLine={false}
+                          width={56}
+                        />
+                        <Tooltip
+                          formatter={(value, _name, item) => [
+                            formatChartPercent(Number(value)),
+                            item.dataKey === "ticker_performance" ? result.ticker : "SPY",
+                          ]}
+                          labelFormatter={(label) => label}
+                        />
+                        <Legend />
+                        <Line
+                          type="monotone"
+                          dataKey="ticker_performance"
+                          name={result.ticker}
+                          stroke="#16a34a"
+                          strokeWidth={3}
+                          dot={false}
+                          connectNulls
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="spy_performance"
+                          name="SPY"
+                          stroke="#eab308"
+                          strokeWidth={2}
+                          dot={false}
+                          connectNulls
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                <div className="mt-3 flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <p>
+                    Last chart refresh: {formatDate(performanceChart?.fetched_at)}
+                    {performanceChart?.is_cached ? " / cached chart" : ""}
+                  </p>
+                  {performanceChart && !performanceChart.benchmark_available && (
+                    <p>SPY comparison is unavailable for this period.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-white p-5 shadow-sm">
                 <h3 className="text-xl font-semibold">Company Summary</h3>
                 <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">
                   {profile.summary ?? "Company summary is unavailable from the current data source."}
@@ -558,8 +797,80 @@ export default function TickerPage() {
               </div>
             </section>
 
-            <aside className="rounded-xl bg-white p-5 shadow-sm">
-              <h3 className="text-xl font-semibold">Company News</h3>
+            <aside className="space-y-6">
+              <section className="rounded-xl bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold">Watchlist Snapshot</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Click a ticker to open its research page.
+                    </p>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold text-slate-500">Watchlist</span>
+                    <select
+                      value={selectedWatchlistId}
+                      onChange={(event) => handleWatchlistChange(event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
+                    >
+                      {watchlists.map((watchlist) => (
+                        <option key={watchlist.id} value={watchlist.id}>
+                          {watchlist.name}{watchlist.is_default ? " (Default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-4 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="p-2 font-semibold">Ticker</th>
+                        <th className="p-2 font-semibold">Price</th>
+                        <th className="p-2 font-semibold">Diff.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isMiniResultsLoading ? (
+                        <tr>
+                          <td colSpan={3} className="p-4 text-center text-slate-500">
+                            Loading watchlist...
+                          </td>
+                        </tr>
+                      ) : miniResults.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="p-4 text-center text-slate-500">
+                            No valuation results yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        miniResults.map((row) => {
+                          const isActiveTicker = row.ticker === result.ticker;
+
+                          return (
+                            <tr
+                              key={row.ticker}
+                              className={`cursor-pointer border-b last:border-0 ${rowClass(row.row_color)} ${
+                                isActiveTicker ? "ring-2 ring-inset ring-slate-900" : "hover:brightness-95"
+                              }`}
+                              onClick={() => openMiniResultTicker(row.ticker)}
+                            >
+                              <td className="p-2 font-semibold">{row.ticker}</td>
+                              <td className="p-2">{formatCurrency(row.stock_price, currency)}</td>
+                              <td className="p-2">{row.calculated_price_difference_display ?? "n/a"}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="rounded-xl bg-white p-5 shadow-sm">
+                <h3 className="text-xl font-semibold">Company News</h3>
               <div className="mt-4 space-y-4">
                 {result.news.length === 0 ? (
                   <p className="text-sm text-slate-500">
@@ -587,6 +898,7 @@ export default function TickerPage() {
                   ))
                 )}
               </div>
+              </section>
             </aside>
           </div>
         )}
