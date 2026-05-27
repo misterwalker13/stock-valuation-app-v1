@@ -498,12 +498,6 @@ export default function Home() {
             >
               Single-Ticker Research
             </Link>
-            <Link
-              href="/philosophy"
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-            >
-              My Philosophy
-            </Link>
             {isAdmin && (
               <Link
                 href="/admin"

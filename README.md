@@ -10,6 +10,7 @@ The app is built as a private admin workspace: users sign in with Supabase Auth,
 - Cleans ticker input, removes duplicates, and supports symbols like `BRK.B`
 - Pulls market data from Yahoo Finance through `yfinance`
 - Shows stock price, calculated valuation output, calculated price difference, and double-negative status
+- Shows supporting financial ratios on the single-ticker research page
 - Uses color-coded rows to make results easier to scan
 - Tracks refresh jobs and latest refreshed timestamps
 - Keeps valuation logic backend-only
@@ -34,6 +35,17 @@ Next.js dashboard
 ```
 
 The browser uses Supabase's public anon key for login and session handling. The backend uses the Supabase service role key for trusted database operations. The service role key must never be exposed to the frontend.
+
+## Financial Ratios
+
+The single-ticker research page displays these supporting ratios when yfinance provides the required statement data:
+
+- Current Ratio = current assets / current liabilities
+- Total Debt Ratio = (total assets - total equity) / total assets
+- Return on Assets = net income / total assets
+- Return on Equity = net income / shareholders' equity
+
+Unavailable inputs display as `n/a`.
 
 ## Environment Variables
 

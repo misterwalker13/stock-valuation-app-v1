@@ -132,6 +132,27 @@ def safe_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
+
+def safe_ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
+    if numerator is None or denominator in (None, 0):
+        return None
+
+    return numerator / denominator
+
+
+def format_decimal_ratio(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+
+    return f"{value:.2f}"
+
+
+def format_percent_ratio(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+
+    return f"{value * 100:.1f}%"
+
 def calculate_valuation(
     stock_price: float,
     eps_ttm: float,
@@ -222,6 +243,105 @@ def build_company_profile(info: Dict[str, Any]) -> Dict[str, Any]:
         "currency": info.get("currency"),
     }
 
+
+def get_statement_value(statement: Any, row_names: List[str]) -> Optional[float]:
+    if statement is None or getattr(statement, "empty", True):
+        return None
+
+    for row_name in row_names:
+        if row_name not in statement.index:
+            continue
+
+        row = statement.loc[row_name].dropna()
+
+        if row.empty:
+            continue
+
+        return safe_float(row.iloc[0])
+
+    return None
+
+
+def first_available_statement(yf_ticker: Any, attribute_names: List[str]) -> Any:
+    for attribute_name in attribute_names:
+        try:
+            statement = getattr(yf_ticker, attribute_name)
+        except Exception:
+            continue
+
+        if statement is not None and not getattr(statement, "empty", True):
+            return statement
+
+    return None
+
+
+def build_financial_ratios(yf_ticker: Any) -> Dict[str, Any]:
+    try:
+        balance_sheet = first_available_statement(
+            yf_ticker,
+            ["quarterly_balance_sheet", "balance_sheet"],
+        )
+        income_statement = first_available_statement(
+            yf_ticker,
+            ["quarterly_financials", "financials"],
+        )
+
+        current_assets = get_statement_value(balance_sheet, ["Current Assets"])
+        current_liabilities = get_statement_value(
+            balance_sheet,
+            ["Current Liabilities"],
+        )
+        total_assets = get_statement_value(balance_sheet, ["Total Assets"])
+        total_equity = get_statement_value(
+            balance_sheet,
+            [
+                "Stockholders Equity",
+                "Total Equity Gross Minority Interest",
+                "Common Stock Equity",
+            ],
+        )
+        net_income = get_statement_value(
+            income_statement,
+            ["Net Income", "Net Income Common Stockholders"],
+        )
+
+        current_ratio = safe_ratio(current_assets, current_liabilities)
+        total_debt_ratio = safe_ratio(
+            total_assets - total_equity
+            if total_assets is not None and total_equity is not None
+            else None,
+            total_assets,
+        )
+        return_on_assets = safe_ratio(net_income, total_assets)
+        return_on_equity = safe_ratio(net_income, total_equity)
+
+        return {
+            "current_ratio_raw": current_ratio,
+            "current_ratio_display": format_decimal_ratio(current_ratio),
+            "total_debt_ratio_raw": total_debt_ratio,
+            "total_debt_ratio_display": format_percent_ratio(total_debt_ratio),
+            "return_on_assets_raw": return_on_assets,
+            "return_on_assets_display": format_percent_ratio(return_on_assets),
+            "return_on_equity_raw": return_on_equity,
+            "return_on_equity_display": format_percent_ratio(return_on_equity),
+        }
+    except Exception:
+        return empty_financial_ratios()
+
+
+def empty_financial_ratios() -> Dict[str, Any]:
+    return {
+        "current_ratio_raw": None,
+        "current_ratio_display": "n/a",
+        "total_debt_ratio_raw": None,
+        "total_debt_ratio_display": "n/a",
+        "return_on_assets_raw": None,
+        "return_on_assets_display": "n/a",
+        "return_on_equity_raw": None,
+        "return_on_equity_display": "n/a",
+    }
+
+
 def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
     """
     Fetches the V1 fields from yfinance.
@@ -239,6 +359,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
 
         info = yf_ticker.info or {}
         company_profile = build_company_profile(info)
+        financial_ratios = build_financial_ratios(yf_ticker)
 
         stock_price = safe_float(
             info.get("currentPrice")
@@ -271,6 +392,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
             "profit_margin": profit_margin,
             "price_sales_ttm": price_sales_ttm,
             "company_profile": company_profile,
+            "financial_ratios": financial_ratios,
             "source_label": "yfinance",
             "source_timestamp": datetime.now(timezone.utc).isoformat(),
             "retrieval_status": "success",
@@ -374,6 +496,7 @@ def fetch_yfinance_data(ticker: str) -> Dict[str, Any]:
                 "source_label": "yfinance",
                 "source_timestamp": datetime.now(timezone.utc).isoformat(),
                 "company_profile": {},
+                "financial_ratios": empty_financial_ratios(),
                 "retrieval_status": "yfinance_error",
                 "error_message": str(exc)[:250],
             },
@@ -393,10 +516,15 @@ def fetch_single_ticker_research(ticker: str) -> Dict[str, Any]:
         news = []
 
     company_profile = data.get("source_payload", {}).get("company_profile") or {}
+    financial_ratios = (
+        data.get("source_payload", {}).get("financial_ratios")
+        or empty_financial_ratios()
+    )
 
     return {
         "ticker": ticker,
         "company_profile": company_profile,
+        "financial_ratios": financial_ratios,
         "news": news,
         "valuation": {
             "ticker": ticker,
@@ -762,6 +890,9 @@ def valuation_row_to_single_ticker_payload(
         "is_cached": True,
         "is_in_current_watchlist": is_in_current_watchlist,
         "company_profile": source_payload.get("company_profile") or {},
+        "financial_ratios": (
+            source_payload.get("financial_ratios") or empty_financial_ratios()
+        ),
         "news": source_payload.get("news") or [],
         "valuation": {
             "ticker": row["ticker"],
