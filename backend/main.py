@@ -93,10 +93,10 @@ def clean_tickers(raw_tickers: List[str]) -> List[str]:
         seen.add(ticker)
         cleaned.append(ticker)
 
-    if len(cleaned) > 100:
+    if len(cleaned) > 500:
         raise HTTPException(
             status_code=400,
-            detail="Version 2 supports a maximum of 100 valid tickers per watchlist."
+            detail="Version 2 supports a maximum of 500 valid tickers per watchlist."
         )
 
     return cleaned
@@ -1067,7 +1067,7 @@ def get_watchlists(profile: Dict[str, Any] = Depends(require_app_user)):
         "watchlists": response.data,
         "limits": {
             "max_watchlists": 2,
-            "max_tickers_per_watchlist": 100,
+            "max_tickers_per_watchlist": 500,
             "watchlist_refresh_seconds": WATCHLIST_REFRESH_COOLDOWN_SECONDS,
         },
     }
@@ -1445,7 +1445,7 @@ def refresh_valuations(
 
     tickers = tickers_response.data
     total_tickers = len(tickers)
-    batch_size = 10
+    batch_size = 20
     total_batches = (total_tickers + batch_size - 1) // batch_size if total_tickers else 0
 
     job_insert_response = (

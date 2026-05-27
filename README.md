@@ -6,7 +6,7 @@ The app is built as a private admin workspace: users sign in with Supabase Auth,
 
 ## What It Does
 
-- Stores and manages up to 100 ticker symbols for Version 1
+- Stores and manages up to 500 ticker symbols per watchlist for Version 2
 - Cleans ticker input, removes duplicates, and supports symbols like `BRK.B`
 - Pulls market data from Yahoo Finance through `yfinance`
 - Shows stock price, calculated valuation output, calculated price difference, and double-negative status

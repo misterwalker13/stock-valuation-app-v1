@@ -113,8 +113,8 @@ function extractTickersFromCsv(csvText: string) {
 
 function apiMessage(data: ApiErrorBody) {
   if (typeof data.detail === "string") {
-    if (data.detail.includes("maximum of 100")) {
-      return "This watchlist is capped at 100 valid tickers for the V2 beta. Trim the list and try again.";
+    if (data.detail.includes("maximum of 500")) {
+      return "This watchlist is capped at 500 valid tickers for the V2 beta. Trim the list and try again.";
     }
 
     if (data.detail.includes("maximum of 2 watchlists")) {
@@ -524,7 +524,7 @@ export default function Home() {
         <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <h2 className="font-semibold">Dashboard User Guide</h2>
           <p className="mt-1">
-            V2 beta accounts can create up to 2 watchlists with 100 tickers each. To keep data usage stable,
+            V2 beta accounts can create up to 2 watchlists with 500 tickers each. To keep data usage stable,
             each watchlist can be refreshed once every {watchlistRefreshSeconds} seconds. Saving tickers automatically starts a refresh when the limit allows it.
           </p>
         </section>
@@ -659,7 +659,7 @@ export default function Home() {
                 </p>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                {tickers.length} / 100
+                {tickers.length} / 500
               </span>
             </div>
 

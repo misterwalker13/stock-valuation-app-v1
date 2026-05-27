@@ -10,7 +10,7 @@ Version 2 moves the app from an admin-only V1 dashboard into an early member bet
 - [x] Add invite-code table for early access signup.
 - [x] Add refresh-event tracking table.
 - [x] Enforce 2 watchlists per user at the database level.
-- [x] Keep 100 tickers per watchlist.
+- [x] Keep 500 tickers per watchlist.
 - [x] Scope existing ticker, valuation, and refresh endpoints to the authenticated user.
 - [x] Allow admins to use the normal member dashboard.
 - [x] Add backend refresh-rate enforcement for watchlist refreshes.
