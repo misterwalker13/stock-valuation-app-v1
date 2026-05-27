@@ -590,7 +590,7 @@ export default function TickerPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? "Looking up..." : "Lookup"}
             </button>
@@ -636,7 +636,7 @@ export default function TickerPage() {
                   <button
                     onClick={addToCurrentWatchlist}
                     disabled={isAdding || result.is_in_current_watchlist}
-                    className="w-fit rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-fit rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {result.is_in_current_watchlist
                       ? "In Watchlist"
@@ -706,7 +706,7 @@ export default function TickerPage() {
                         onClick={() => setChartPeriod(period)}
                         className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                           chartPeriod === period
-                            ? "bg-slate-900 text-white"
+                            ? "bg-green-700 text-white"
                             : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                       >

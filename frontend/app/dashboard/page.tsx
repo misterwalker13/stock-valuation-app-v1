@@ -602,7 +602,7 @@ export default function Home() {
           <div className="flex flex-wrap gap-2">
             <Link
               href={`/ticker${selectedWatchlistId ? `?ticker_list_id=${encodeURIComponent(selectedWatchlistId)}` : ""}`}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800"
             >
               Single-Ticker Research
             </Link>
@@ -662,7 +662,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={watchlists.length >= 2 || !newWatchlistName.trim()}
-              className="self-end rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="self-end rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Add
             </button>
@@ -671,7 +671,7 @@ export default function Home() {
           <button
             onClick={() => refreshValuations()}
             disabled={isRefreshing}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isRefreshing ? "Refreshing..." : "Refresh Valuations"}
           </button>
@@ -796,7 +796,7 @@ export default function Home() {
                 type="file"
                 accept=".csv,text/csv"
                 onChange={handleCsvUpload}
-                className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white"
+                className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-green-700 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white"
               />
             </label>
 
@@ -810,7 +810,7 @@ export default function Home() {
             <button
               onClick={saveTickers}
               disabled={isRefreshing}
-              className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-4 w-full rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRefreshing ? "Refreshing..." : "Save Tickers & Refresh"}
             </button>

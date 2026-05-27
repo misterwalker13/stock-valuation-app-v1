@@ -117,7 +117,7 @@ export default function AdminPage() {
             <button
               onClick={loadUsers}
               disabled={isLoading}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? "Loading..." : "Refresh"}
             </button>
