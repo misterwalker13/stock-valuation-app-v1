@@ -240,6 +240,11 @@ export default function TickerPage() {
     return false;
   }, [router]);
 
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
   const loadWatchlists = useCallback(async (preferredWatchlistId = "") => {
     const headers = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/watchlists`, { headers });
@@ -544,12 +549,20 @@ export default function TickerPage() {
             </p>
           </div>
 
-          <Link
-            href="/dashboard"
-            className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-          >
-            Dashboard
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/dashboard"
+              className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+            >
+              Dashboard
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="w-fit rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Log Out
+            </button>
+          </div>
         </header>
 
         <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
