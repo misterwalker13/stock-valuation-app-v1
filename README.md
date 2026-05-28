@@ -104,6 +104,19 @@ Use `http://localhost:3000` for local browser testing.
 FRONTEND_ORIGIN=https://stock-valuation-app-v1.vercel.app
 ```
 
+## Invite Links
+
+Early member access is controlled by invite codes stored in the Supabase
+`invite_codes` table. To send a prefilled signup link, create an active invite
+code in Supabase and append it to the signup URL:
+
+```text
+https://stock-valuation-app-v1.vercel.app/signup?invite=TRITON-FRIEND-01
+```
+
+The signup page also accepts `?code=` and `?invite_code=` as aliases. Invite
+codes are normalized to uppercase before submission.
+
 ## Security Notes
 
 - Valuation logic is proprietary and must remain backend-only.

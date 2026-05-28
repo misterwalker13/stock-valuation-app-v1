@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,10 @@ type SignupErrorBody = {
   detail?: string;
 };
 
+function normalizeInviteCode(value: string) {
+  return value.trim().toUpperCase();
+}
+
 export default function SignupPage() {
   const router = useRouter();
 
@@ -22,6 +26,16 @@ export default function SignupPage() {
   const [newsletterOptedIn, setNewsletterOptedIn] = useState(true);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteParam =
+      params.get("invite") ?? params.get("invite_code") ?? params.get("code");
+
+    if (inviteParam) {
+      setInviteCode(normalizeInviteCode(inviteParam));
+    }
+  }, []);
 
   async function handleSignup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +120,9 @@ export default function SignupPage() {
             <input
               type="text"
               value={inviteCode}
-              onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+              onChange={(event) =>
+                setInviteCode(normalizeInviteCode(event.target.value))
+              }
               className="mt-1 w-full rounded-lg border border-slate-300 p-3 text-sm uppercase"
               required
             />
