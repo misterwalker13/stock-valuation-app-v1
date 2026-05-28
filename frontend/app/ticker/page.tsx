@@ -558,7 +558,7 @@ export default function TickerPage() {
             </Link>
             <button
               onClick={handleLogout}
-              className="w-fit rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              className="w-fit rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
             >
               Log Out
             </button>
