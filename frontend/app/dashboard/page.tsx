@@ -200,6 +200,9 @@ export default function Home() {
   const [tickers, setTickers] = useState<TickerItem[]>([]);
   const [results, setResults] = useState<ValuationResult[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+  const [dashboardLoadProgress, setDashboardLoadProgress] = useState(0);
+  const [dashboardLoadLabel, setDashboardLoadLabel] = useState("Preparing dashboard...");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshJob, setRefreshJob] = useState<RefreshJob | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
@@ -524,14 +527,31 @@ export default function Home() {
 
       setWatchlistRefreshSeconds(data.refresh_limits?.watchlist_seconds ?? 60);
       setIsAdmin(Boolean(data.is_admin));
+      setIsAuthChecking(false);
+      setIsDashboardLoading(true);
+      setDashboardLoadProgress(10);
+      setDashboardLoadLabel("Loading watchlists...");
+
       const activeWatchlistId = await loadWatchlists();
+      setDashboardLoadProgress(40);
 
       if (activeWatchlistId) {
-        await loadTickers(activeWatchlistId);
-        await loadResults(activeWatchlistId);
+        setDashboardLoadLabel("Loading tickers and valuation results...");
+        await Promise.all([
+          loadTickers(activeWatchlistId).then(() => {
+            setDashboardLoadProgress((progress) => Math.max(progress, 70));
+          }),
+          loadResults(activeWatchlistId).then(() => {
+            setDashboardLoadProgress((progress) => Math.max(progress, 90));
+          }),
+        ]);
       }
 
-      setIsAuthChecking(false);
+      setDashboardLoadLabel("Dashboard ready.");
+      setDashboardLoadProgress(100);
+      window.setTimeout(() => {
+        setIsDashboardLoading(false);
+      }, 400);
     }
 
     checkAuthAndLoadData();
@@ -631,12 +651,32 @@ export default function Home() {
           </p>
         </section>
 
+        {isDashboardLoading && (
+          <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-900">
+                {dashboardLoadLabel}
+              </p>
+              <p className="text-xs font-semibold text-slate-600">
+                {dashboardLoadProgress}%
+              </p>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-green-600 transition-all duration-500"
+                style={{ width: `${Math.max(dashboardLoadProgress, 5)}%` }}
+              />
+            </div>
+          </section>
+        )}
+
         <div className="mb-4 flex flex-col gap-3 rounded-lg bg-white p-4 shadow-sm lg:flex-row lg:items-end lg:justify-between">
           <label className="block flex-1">
             <span className="mb-1 block text-sm font-medium">Current Watchlist</span>
             <select
               value={selectedWatchlistId}
               onChange={handleWatchlistChange}
+              disabled={isDashboardLoading}
               className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
             >
               {watchlists.map((watchlist) => (
@@ -654,14 +694,14 @@ export default function Home() {
                 type="text"
                 value={newWatchlistName}
                 onChange={(event) => setNewWatchlistName(event.target.value)}
-                disabled={watchlists.length >= 2}
+                disabled={isDashboardLoading || watchlists.length >= 2}
                 className="w-full rounded-lg border border-slate-300 p-2 text-sm disabled:bg-slate-100"
                 placeholder={watchlists.length >= 2 ? "2 watchlist limit reached" : "Watchlist name"}
               />
             </label>
             <button
               type="submit"
-              disabled={watchlists.length >= 2 || !newWatchlistName.trim()}
+              disabled={isDashboardLoading || watchlists.length >= 2 || !newWatchlistName.trim()}
               className="self-end rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Add
@@ -670,7 +710,7 @@ export default function Home() {
 
           <button
             onClick={() => refreshValuations()}
-            disabled={isRefreshing}
+            disabled={isDashboardLoading || isRefreshing}
             className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isRefreshing ? "Refreshing..." : "Refresh Valuations"}
@@ -729,7 +769,20 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.length === 0 ? (
+                  {isDashboardLoading ? (
+                    <tr>
+                      <td className="p-3 text-slate-500" colSpan={5}>
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6">
+                          <p className="font-medium text-slate-700">
+                            Loading your dashboard data...
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Watchlists, saved tickers, and valuation results will appear here shortly.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : results.length === 0 ? (
                     <tr>
                       <td className="p-3 text-slate-500" colSpan={5}>
                         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6">
@@ -796,6 +849,7 @@ export default function Home() {
                 type="file"
                 accept=".csv,text/csv"
                 onChange={handleCsvUpload}
+                disabled={isDashboardLoading}
                 className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-green-700 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white"
               />
             </label>
@@ -803,13 +857,14 @@ export default function Home() {
             <textarea
               value={tickerText}
               onChange={(event) => setTickerText(event.target.value)}
+              disabled={isDashboardLoading}
               className="h-72 w-full resize-none rounded-lg border border-slate-300 p-3 font-mono text-sm"
               placeholder={"Paste tickers here, one per line:\nAAPL\nMSFT\nBRK.B"}
             />
 
             <button
               onClick={saveTickers}
-              disabled={isRefreshing}
+              disabled={isDashboardLoading || isRefreshing}
               className="mt-4 w-full rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRefreshing ? "Refreshing..." : "Save Tickers & Refresh"}
