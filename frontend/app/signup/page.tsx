@@ -72,8 +72,8 @@ export default function SignupPage() {
     setIsLoading(false);
 
     if (error) {
-      setMessage("Account created. Please sign in from the login page.");
-      router.push("/login");
+      setMessage("Account created. Please sign in from the login page. If your password does not work, use Forgot password? to set a new one.");
+      router.push("/login?message=account-created");
       return;
     }
 

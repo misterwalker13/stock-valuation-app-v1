@@ -1,17 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
-export default function LoginPage() {
+function friendlyLoginError(message: string) {
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("invalid login credentials")) {
+    return "We could not sign you in with that email and password. Check for typos, or use Forgot password? to reset your password.";
+  }
+
+  if (lowerMessage.includes("email not confirmed")) {
+    return "Please confirm your email before signing in. If you recently signed up and still cannot get in, try resetting your password.";
+  }
+
+  return `${message} If you recently signed up and cannot log in, try Forgot password? below.`;
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("message") === "account-created") {
+      setMessage("Account created. Please sign in. If your password does not work, use Forgot password? to set a new one.");
+    }
+  }, [searchParams]);
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,7 +48,7 @@ export default function LoginPage() {
     setIsLoading(false);
 
     if (error) {
-      setMessage(error.message);
+      setMessage(friendlyLoginError(error.message));
       return;
     }
 
@@ -61,7 +82,15 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium">Password</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="block text-sm font-medium">Password</label>
+              <Link
+                href="/reset-password"
+                className="text-sm font-semibold text-slate-900 underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}
@@ -87,5 +116,19 @@ export default function LoginPage() {
         )}
       </section>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6 text-slate-900">
+          <p className="text-sm font-medium">Loading login...</p>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
